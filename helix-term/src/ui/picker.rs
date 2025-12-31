@@ -254,6 +254,8 @@ pub struct Picker<T: 'static + Send + Sync, D: 'static> {
 
     /// Whether to show the preview panel (default true)
     show_preview: bool,
+    /// Scroll offset for the preview panel
+    preview_scroll_offset: ViewPosition,
     /// Constraints for tabular formatting
     widths: Vec<Constraint>,
 
@@ -385,6 +387,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             query,
             truncate_start: true,
             show_preview: true,
+            preview_scroll_offset: ViewPosition::default(),
             callback_fn: Box::new(callback_fn),
             default_action: Action::Replace,
             completion_height: 0,
@@ -464,6 +467,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             return;
         }
 
+        let old_cursor = self.cursor;
         match direction {
             Direction::Forward => {
                 self.cursor = self.cursor.saturating_add(amount) % len;
@@ -471,6 +475,11 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             Direction::Backward => {
                 self.cursor = self.cursor.saturating_add(len).saturating_sub(amount) % len;
             }
+        }
+
+        // Reset preview scroll when moving to a different entry
+        if old_cursor != self.cursor {
+            self.reset_preview_scroll();
         }
     }
 
@@ -487,6 +496,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
     /// Move the cursor to the first entry
     pub fn to_start(&mut self) {
         self.cursor = 0;
+        self.reset_preview_scroll();
     }
 
     /// Move the cursor to the last entry
@@ -496,6 +506,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             .snapshot()
             .matched_item_count()
             .saturating_sub(1);
+        self.reset_preview_scroll();
     }
 
     pub fn selection(&self) -> Option<&T> {
@@ -522,6 +533,23 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
 
     pub fn toggle_preview(&mut self) {
         self.show_preview = !self.show_preview;
+    }
+
+    /// Scroll the preview panel up by the given number of lines
+    pub fn scroll_preview_up(&mut self, scroll_lines: usize) {
+        self.preview_scroll_offset.vertical_offset =
+            self.preview_scroll_offset.vertical_offset.saturating_sub(scroll_lines);
+    }
+
+    /// Scroll the preview panel down by the given number of lines
+    pub fn scroll_preview_down(&mut self, scroll_lines: usize) {
+        self.preview_scroll_offset.vertical_offset =
+            self.preview_scroll_offset.vertical_offset.saturating_add(scroll_lines);
+    }
+
+    /// Reset the preview scroll offset (useful when changing selections)
+    pub fn reset_preview_scroll(&mut self) {
+        self.preview_scroll_offset = ViewPosition::default();
     }
 
     fn prompt_handle_event(&mut self, event: &Event, cx: &mut Context) -> EventResult {
@@ -897,6 +925,9 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         let inner = inner.inner(margin);
         BLOCK.render(area, surface);
 
+        // Copy scroll offset before borrowing self
+        let user_scroll_offset = self.preview_scroll_offset;
+
         if let Some((preview, range)) = self.get_preview(cx.editor) {
             let doc = match preview.document() {
                 Some(doc)
@@ -957,6 +988,10 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
                     offset.anchor = start;
                 }
             }
+
+            // Apply user's scroll offset to the calculated offset
+            offset.vertical_offset = offset.vertical_offset.saturating_add(user_scroll_offset.vertical_offset);
+            offset.horizontal_offset = offset.horizontal_offset.saturating_add(user_scroll_offset.horizontal_offset);
 
             let loader = cx.editor.syn_loader.load();
 
@@ -1036,7 +1071,46 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
     }
 
     fn handle_event(&mut self, event: &Event, ctx: &mut Context) -> EventResult {
-        // TODO: keybinds for scrolling preview
+        // Handle mouse events for preview scrolling if enabled
+        if let Event::Mouse(mouse_event) = event {
+            if ctx.editor.config().picker_preview_scroll && ctx.editor.config().mouse {
+                use helix_view::input::MouseEventKind;
+
+                // Calculate the preview area to check if mouse is within it
+                let area = ctx.editor.tree.area();
+                let render_preview =
+                    self.show_preview && self.file_fn.is_some() && area.width > MIN_AREA_WIDTH_FOR_PREVIEW;
+
+                if render_preview {
+                    let picker_width = area.width / 2;
+                    let preview_area = area.clip_left(picker_width);
+
+                    // Check if mouse is within preview area
+                    let mouse_is_within_preview = mouse_event.column >= preview_area.left()
+                        && mouse_event.column < preview_area.right()
+                        && mouse_event.row >= preview_area.top()
+                        && mouse_event.row < preview_area.bottom();
+
+                    if mouse_is_within_preview {
+                        // Handle scroll events
+                        match mouse_event.kind {
+                            MouseEventKind::ScrollDown => {
+                                let scroll_lines = ctx.editor.config().scroll_lines.unsigned_abs();
+                                self.scroll_preview_down(scroll_lines);
+                                return EventResult::Consumed(None);
+                            }
+                            MouseEventKind::ScrollUp => {
+                                let scroll_lines = ctx.editor.config().scroll_lines.unsigned_abs();
+                                self.scroll_preview_up(scroll_lines);
+                                return EventResult::Consumed(None);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            return EventResult::Ignored(None);
+        }
 
         let key_event = match event {
             Event::Key(event) => *event,
@@ -1086,6 +1160,18 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
             }
             key!(End) => {
                 self.to_end();
+            }
+            alt!(Up) | ctrl!('y') => {
+                if ctx.editor.config().picker_preview_scroll {
+                    let scroll_lines = ctx.editor.config().scroll_lines.unsigned_abs();
+                    self.scroll_preview_up(scroll_lines);
+                }
+            }
+            alt!(Down) | ctrl!('e') => {
+                if ctx.editor.config().picker_preview_scroll {
+                    let scroll_lines = ctx.editor.config().scroll_lines.unsigned_abs();
+                    self.scroll_preview_down(scroll_lines);
+                }
             }
             key!(Esc) | ctrl!('c') => return close_fn(self),
             alt!(Enter) => {
