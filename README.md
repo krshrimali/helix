@@ -16,6 +16,12 @@
 
 </div>
 
+## Custom Features Added
+
+| Feature | Description | Keyboard Shortcuts | Mouse Support | Configuration |
+|---------|-------------|-------------------|---------------|---------------|
+| **Picker Preview Scrolling** | Scroll through file previews in pickers without changing selection | `Alt+Up`/`Alt+Down` or `Ctrl+y`/`Ctrl+e` | Scroll wheel over preview panel | `picker-preview-scroll = true` (default) |
+
 ![Screenshot](./screenshot.png)
 
 A [Kakoune](https://github.com/mawww/kakoune) / [Neovim](https://github.com/neovim/neovim) inspired editor, written in Rust.
