@@ -2,9 +2,7 @@ mod handlers;
 mod query;
 
 use crate::{
-    alt,
     compositor::{self, Component, Compositor, Context, Event, EventResult},
-    ctrl, key, shift,
     ui::{
         self,
         document::{render_document, LinePos, TextRenderer},
@@ -59,6 +57,88 @@ pub const ID: &str = "picker";
 pub const MIN_AREA_WIDTH_FOR_PREVIEW: u16 = 72;
 /// Biggest file size to preview in bytes
 pub const MAX_FILE_SIZE_FOR_PREVIEW: u64 = 10 * 1024 * 1024;
+
+/// Picker-specific actions that can be bound to keys
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PickerAction {
+    /// Move to the previous entry in the picker
+    MovePrev,
+    /// Move to the next entry in the picker
+    MoveNext,
+    /// Move one page up in the picker entries
+    PageUp,
+    /// Move one page down in the picker entries
+    PageDown,
+    /// Move to the first entry
+    MoveToStart,
+    /// Move to the last entry
+    MoveToEnd,
+    /// Scroll the preview panel up
+    ScrollPreviewUp,
+    /// Scroll the preview panel down
+    ScrollPreviewDown,
+    /// Toggle preview visibility
+    TogglePreview,
+    /// Close the picker
+    Close,
+    /// Select the current entry with default action
+    Select,
+    /// Select with alternate action
+    SelectAlternate,
+    /// Select and open in horizontal split
+    SelectHorizontalSplit,
+    /// Select and open in vertical split
+    SelectVerticalSplit,
+}
+
+impl std::str::FromStr for PickerAction {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use PickerAction::*;
+        Ok(match s {
+            "move_prev" => MovePrev,
+            "move_next" => MoveNext,
+            "page_up" => PageUp,
+            "page_down" => PageDown,
+            "move_to_start" => MoveToStart,
+            "move_to_end" => MoveToEnd,
+            "scroll_preview_up" => ScrollPreviewUp,
+            "scroll_preview_down" => ScrollPreviewDown,
+            "toggle_preview" => TogglePreview,
+            "close" => Close,
+            "select" => Select,
+            "select_alternate" => SelectAlternate,
+            "select_horizontal_split" => SelectHorizontalSplit,
+            "select_vertical_split" => SelectVerticalSplit,
+            _ => anyhow::bail!("Invalid picker action '{}'", s),
+        })
+    }
+}
+
+impl std::fmt::Display for PickerAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use PickerAction::*;
+        let s = match self {
+            MovePrev => "move_prev",
+            MoveNext => "move_next",
+            PageUp => "page_up",
+            PageDown => "page_down",
+            MoveToStart => "move_to_start",
+            MoveToEnd => "move_to_end",
+            ScrollPreviewUp => "scroll_preview_up",
+            ScrollPreviewDown => "scroll_preview_down",
+            TogglePreview => "toggle_preview",
+            Close => "close",
+            Select => "select",
+            SelectAlternate => "select_alternate",
+            SelectHorizontalSplit => "select_horizontal_split",
+            SelectVerticalSplit => "select_vertical_split",
+        };
+        write!(f, "{}", s)
+    }
+}
 
 #[derive(PartialEq, Eq, Hash)]
 pub enum PathOrId<'a> {
@@ -1119,6 +1199,9 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
             _ => return EventResult::Ignored(None),
         };
 
+        // Look up action from keymap
+        let action = ctx.picker_keymap.get(&key_event);
+
         let close_fn = |picker: &mut Self| {
             // if the picker is very large don't store it as last_picker to avoid
             // excessive memory consumption
@@ -1142,99 +1225,104 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
             EventResult::Consumed(Some(callback))
         };
 
-        match key_event {
-            shift!(Tab) | key!(Up) | ctrl!('p') => {
-                self.move_by(1, Direction::Backward);
-            }
-            key!(Tab) | key!(Down) | ctrl!('n') => {
-                self.move_by(1, Direction::Forward);
-            }
-            key!(PageDown) | ctrl!('d') => {
-                self.page_down();
-            }
-            key!(PageUp) | ctrl!('u') => {
-                self.page_up();
-            }
-            key!(Home) => {
-                self.to_start();
-            }
-            key!(End) => {
-                self.to_end();
-            }
-            alt!(Up) | ctrl!('y') => {
-                if ctx.editor.config().picker_preview_scroll {
-                    let scroll_lines = ctx.editor.config().scroll_lines.unsigned_abs();
-                    self.scroll_preview_up(scroll_lines);
+        // Execute action based on keymap lookup
+        if let Some(&action) = action {
+            use PickerAction::*;
+            match action {
+                MovePrev => {
+                    self.move_by(1, Direction::Backward);
                 }
-            }
-            alt!(Down) | ctrl!('e') => {
-                if ctx.editor.config().picker_preview_scroll {
-                    let scroll_lines = ctx.editor.config().scroll_lines.unsigned_abs();
-                    self.scroll_preview_down(scroll_lines);
+                MoveNext => {
+                    self.move_by(1, Direction::Forward);
                 }
-            }
-            key!(Esc) | ctrl!('c') => return close_fn(self),
-            alt!(Enter) => {
-                if let Some(option) = self.selection() {
-                    (self.callback_fn)(ctx, option, self.default_action);
+                PageUp => {
+                    self.page_up();
                 }
-            }
-            key!(Enter) => {
-                // If the prompt has a history completion and is empty, use enter to accept
-                // that completion
-                if let Some(completion) = self
-                    .prompt
-                    .first_history_completion(ctx.editor)
-                    .filter(|_| self.prompt.line().is_empty())
-                {
-                    // The percent character is used by the query language and needs to be
-                    // escaped with a backslash.
-                    let completion = if completion.contains('%') {
-                        completion.replace('%', "\\%")
-                    } else {
-                        completion.into_owned()
-                    };
-                    self.prompt.set_line(completion, ctx.editor);
+                PageDown => {
+                    self.page_down();
+                }
+                MoveToStart => {
+                    self.to_start();
+                }
+                MoveToEnd => {
+                    self.to_end();
+                }
+                ScrollPreviewUp => {
+                    if ctx.editor.config().picker_preview_scroll {
+                        let scroll_lines = ctx.editor.config().scroll_lines.unsigned_abs();
+                        self.scroll_preview_up(scroll_lines);
+                    }
+                }
+                ScrollPreviewDown => {
+                    if ctx.editor.config().picker_preview_scroll {
+                        let scroll_lines = ctx.editor.config().scroll_lines.unsigned_abs();
+                        self.scroll_preview_down(scroll_lines);
+                    }
+                }
+                TogglePreview => {
+                    self.toggle_preview();
+                }
+                Close => {
+                    return close_fn(self);
+                }
+                Select => {
+                    // If the prompt has a history completion and is empty, use enter to accept
+                    // that completion
+                    if let Some(completion) = self
+                        .prompt
+                        .first_history_completion(ctx.editor)
+                        .filter(|_| self.prompt.line().is_empty())
+                    {
+                        // The percent character is used by the query language and needs to be
+                        // escaped with a backslash.
+                        let completion = if completion.contains('%') {
+                            completion.replace('%', "\\%")
+                        } else {
+                            completion.into_owned()
+                        };
+                        self.prompt.set_line(completion, ctx.editor);
 
-                    // Inserting from the history register is a paste.
-                    self.handle_prompt_change(true);
-                } else {
+                        // Inserting from the history register is a paste.
+                        self.handle_prompt_change(true);
+                    } else {
+                        if let Some(option) = self.selection() {
+                            (self.callback_fn)(ctx, option, self.default_action);
+                        }
+                        if let Some(history_register) = self.prompt.history_register() {
+                            if let Err(err) = ctx
+                                .editor
+                                .registers
+                                .push(history_register, self.primary_query().to_string())
+                            {
+                                ctx.editor.set_error(err.to_string());
+                            }
+                        }
+                        return close_fn(self);
+                    }
+                }
+                SelectAlternate => {
                     if let Some(option) = self.selection() {
                         (self.callback_fn)(ctx, option, self.default_action);
                     }
-                    if let Some(history_register) = self.prompt.history_register() {
-                        if let Err(err) = ctx
-                            .editor
-                            .registers
-                            .push(history_register, self.primary_query().to_string())
-                        {
-                            ctx.editor.set_error(err.to_string());
-                        }
+                }
+                SelectHorizontalSplit => {
+                    if let Some(option) = self.selection() {
+                        (self.callback_fn)(ctx, option, Action::HorizontalSplit);
+                    }
+                    return close_fn(self);
+                }
+                SelectVerticalSplit => {
+                    if let Some(option) = self.selection() {
+                        (self.callback_fn)(ctx, option, Action::VerticalSplit);
                     }
                     return close_fn(self);
                 }
             }
-            ctrl!('s') => {
-                if let Some(option) = self.selection() {
-                    (self.callback_fn)(ctx, option, Action::HorizontalSplit);
-                }
-                return close_fn(self);
-            }
-            ctrl!('v') => {
-                if let Some(option) = self.selection() {
-                    (self.callback_fn)(ctx, option, Action::VerticalSplit);
-                }
-                return close_fn(self);
-            }
-            ctrl!('t') => {
-                self.toggle_preview();
-            }
-            _ => {
-                self.prompt_handle_event(event, ctx);
-            }
+            EventResult::Consumed(None)
+        } else {
+            // Key not found in picker keymap, pass to prompt for text input
+            self.prompt_handle_event(event, ctx)
         }
-
-        EventResult::Consumed(None)
     }
 
     fn cursor(&self, area: Rect, editor: &Editor) -> (Option<Position>, CursorKind) {

@@ -19,12 +19,15 @@ use crate::job::Jobs;
 use crate::ui::picker;
 use helix_view::Editor;
 
+pub use crate::keymap::PickerKeymap;
+
 pub use helix_view::input::Event;
 
 pub struct Context<'a> {
     pub editor: &'a mut Editor,
     pub scroll: Option<usize>,
     pub jobs: &'a mut Jobs,
+    pub picker_keymap: &'a PickerKeymap,
 }
 
 impl Context<'_> {
@@ -78,16 +81,18 @@ pub trait Component: Any + AnyComponent {
 pub struct Compositor {
     layers: Vec<Box<dyn Component>>,
     area: Rect,
+    picker_keymap: PickerKeymap,
 
     pub(crate) last_picker: Option<Box<dyn Component>>,
     pub(crate) full_redraw: bool,
 }
 
 impl Compositor {
-    pub fn new(area: Rect) -> Self {
+    pub fn new(area: Rect, picker_keymap: PickerKeymap) -> Self {
         Self {
             layers: Vec::new(),
             area,
+            picker_keymap,
             last_picker: None,
             full_redraw: false,
         }
@@ -95,6 +100,10 @@ impl Compositor {
 
     pub fn size(&self) -> Rect {
         self.area
+    }
+
+    pub fn picker_keymap(&self) -> PickerKeymap {
+        self.picker_keymap.clone()
     }
 
     pub fn resize(&mut self, area: Rect) {

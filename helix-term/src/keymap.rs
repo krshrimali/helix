@@ -2,6 +2,7 @@ pub mod default;
 pub mod macros;
 
 pub use crate::commands::MappableCommand;
+pub use crate::ui::picker::PickerAction;
 use arc_swap::{
     access::{DynAccess, DynGuard},
     ArcSwap,
@@ -286,8 +287,13 @@ pub enum KeymapResult {
 /// A map of command names to keybinds that will execute the command.
 pub type ReverseKeymap = HashMap<String, Vec<Vec<KeyEvent>>>;
 
+/// Picker keymap: maps key events directly to picker actions
+pub type PickerKeymap = HashMap<KeyEvent, PickerAction>;
+
 pub struct Keymaps {
     pub map: Box<dyn DynAccess<HashMap<Mode, KeyTrie>>>,
+    /// Picker-specific keymap
+    pub picker: PickerKeymap,
     /// Stores pending keys waiting for the next key. This is relative to a
     /// sticky node if one is in use.
     state: Vec<KeyEvent>,
@@ -296,9 +302,10 @@ pub struct Keymaps {
 }
 
 impl Keymaps {
-    pub fn new(map: Box<dyn DynAccess<HashMap<Mode, KeyTrie>>>) -> Self {
+    pub fn new(map: Box<dyn DynAccess<HashMap<Mode, KeyTrie>>>, picker: PickerKeymap) -> Self {
         Self {
             map,
+            picker,
             state: Vec::new(),
             sticky: None,
         }
@@ -383,7 +390,8 @@ impl Keymaps {
 
 impl Default for Keymaps {
     fn default() -> Self {
-        Self::new(Box::new(ArcSwap::new(Arc::new(default()))))
+        let (mode_keymaps, picker_keymap) = default();
+        Self::new(Box::new(ArcSwap::new(Arc::new(mode_keymaps))), picker_keymap)
     }
 }
 

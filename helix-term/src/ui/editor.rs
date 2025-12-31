@@ -492,14 +492,14 @@ impl EditorView {
         let cursor_scope = match mode {
             Mode::Insert => theme.find_highlight_exact("ui.cursor.insert"),
             Mode::Select => theme.find_highlight_exact("ui.cursor.select"),
-            Mode::Normal => theme.find_highlight_exact("ui.cursor.normal"),
+            Mode::Normal | Mode::Picker => theme.find_highlight_exact("ui.cursor.normal"),
         }
         .unwrap_or(base_cursor_scope);
 
         let primary_cursor_scope = match mode {
             Mode::Insert => theme.find_highlight_exact("ui.cursor.primary.insert"),
             Mode::Select => theme.find_highlight_exact("ui.cursor.primary.select"),
-            Mode::Normal => theme.find_highlight_exact("ui.cursor.primary.normal"),
+            Mode::Normal | Mode::Picker => theme.find_highlight_exact("ui.cursor.primary.normal"),
         }
         .unwrap_or(base_primary_cursor_scope);
 
@@ -1411,10 +1411,13 @@ impl Component for EditorView {
                             if let Some(completion) = &mut self.completion {
                                 let res = {
                                     // use a fake context here
+                                    use std::collections::HashMap;
+                                    let empty_picker_keymap = HashMap::new();
                                     let mut cx = Context {
                                         editor: cx.editor,
                                         jobs: cx.jobs,
                                         scroll: None,
+                                        picker_keymap: &empty_picker_keymap,
                                     };
 
                                     if let EventResult::Consumed(callback) =
