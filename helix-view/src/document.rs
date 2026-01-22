@@ -155,6 +155,9 @@ pub struct Document {
     pub inlay_hints_oudated: bool,
 
     path: Option<PathBuf>,
+    /// Custom display name for special buffers (e.g., "[quickfix]").
+    /// If set, this takes precedence over path in display_name().
+    custom_name: Option<String>,
     relative_path: OnceCell<Option<PathBuf>>,
     encoding: &'static encoding::Encoding,
     has_bom: bool,
@@ -698,6 +701,7 @@ impl Document {
             id: DocumentId::default(),
             active_snippet: None,
             path: None,
+            custom_name: None,
             relative_path: OnceCell::new(),
             encoding,
             has_bom,
@@ -2000,8 +2004,23 @@ impl Document {
     }
 
     pub fn display_name(&self) -> Cow<'_, str> {
+        // Use custom name if set (for special buffers like [quickfix])
+        if let Some(ref name) = self.custom_name {
+            return Cow::Borrowed(name.as_str());
+        }
         self.relative_path()
             .map_or_else(|| SCRATCH_BUFFER_NAME.into(), |path| path.to_string_lossy())
+    }
+
+    /// Set a custom display name for this document.
+    /// Used for special buffers like [quickfix].
+    pub fn set_custom_name(&mut self, name: impl Into<String>) {
+        self.custom_name = Some(name.into());
+    }
+
+    /// Get the custom name if set.
+    pub fn custom_name(&self) -> Option<&str> {
+        self.custom_name.as_deref()
     }
 
     // transact(Fn) ?

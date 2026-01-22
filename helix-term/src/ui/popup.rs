@@ -39,6 +39,8 @@ pub struct Popup<T: Component> {
     ignore_escape_key: bool,
     id: &'static str,
     has_scrollbar: bool,
+    /// Whether the popup is in focused mode, allowing search and navigation.
+    focused: bool,
 }
 
 impl<T: Component> Popup<T> {
@@ -53,6 +55,7 @@ impl<T: Component> Popup<T> {
             ignore_escape_key: false,
             id,
             has_scrollbar: true,
+            focused: false,
         }
     }
 
@@ -117,6 +120,25 @@ impl<T: Component> Popup<T> {
 
     pub fn contents_mut(&mut self) -> &mut T {
         &mut self.contents
+    }
+
+    /// Check if the popup is in focused mode.
+    pub fn is_focused(&self) -> bool {
+        self.focused
+    }
+
+    /// Set the popup's focused state.
+    pub fn set_focused(&mut self, focused: bool) {
+        self.focused = focused;
+        // When focused, disable auto_close so the popup stays open
+        if focused {
+            self.auto_close = false;
+        }
+    }
+
+    /// Toggle the popup's focused state.
+    pub fn toggle_focused(&mut self) {
+        self.set_focused(!self.focused);
     }
 
     pub fn area(&mut self, viewport: Rect, editor: &Editor) -> Rect {
@@ -279,30 +301,81 @@ impl<T: Component> Component for Popup<T> {
             compositor.remove(self.id.as_ref());
         });
 
-        match key {
-            // esc or ctrl-c aborts the completion and closes the menu
-            key!(Esc) | ctrl!('c') => {
-                let _ = self.contents.handle_event(event, cx);
-                EventResult::Consumed(Some(close_fn))
-            }
-            ctrl!('d') => {
-                self.scroll_half_page_down();
-                EventResult::Consumed(None)
-            }
-            ctrl!('u') => {
-                self.scroll_half_page_up();
-                EventResult::Consumed(None)
-            }
-            _ => {
-                let contents_event_result = self.contents.handle_event(event, cx);
-
-                if self.auto_close {
-                    if let EventResult::Ignored(None) = contents_event_result {
-                        return EventResult::Ignored(Some(close_fn));
-                    }
+        // When focused, handle keys differently
+        if self.focused {
+            match key {
+                // Esc exits focused mode instead of closing
+                key!(Esc) => {
+                    self.focused = false;
+                    EventResult::Consumed(None)
                 }
+                // Ctrl+C still closes
+                ctrl!('c') => {
+                    let _ = self.contents.handle_event(event, cx);
+                    EventResult::Consumed(Some(close_fn))
+                }
+                // j/down scrolls down
+                key!('j') | key!(Down) => {
+                    self.scroll_half_pages += 1;
+                    EventResult::Consumed(None)
+                }
+                // k/up scrolls up
+                key!('k') | key!(Up) => {
+                    self.scroll_half_pages = self.scroll_half_pages.saturating_sub(1);
+                    EventResult::Consumed(None)
+                }
+                // Ctrl+d scrolls half page down
+                ctrl!('d') => {
+                    self.scroll_half_page_down();
+                    EventResult::Consumed(None)
+                }
+                // Ctrl+u scrolls half page up
+                ctrl!('u') => {
+                    self.scroll_half_page_up();
+                    EventResult::Consumed(None)
+                }
+                // g goes to top
+                key!('g') => {
+                    self.scroll_half_pages = 0;
+                    EventResult::Consumed(None)
+                }
+                // G goes to bottom (large number, will be clamped)
+                key!('G') => {
+                    self.scroll_half_pages = usize::MAX / 2;
+                    EventResult::Consumed(None)
+                }
+                _ => {
+                    // Pass other events to contents
+                    self.contents.handle_event(event, cx)
+                }
+            }
+        } else {
+            // Normal (unfocused) behavior
+            match key {
+                // esc or ctrl-c aborts the completion and closes the menu
+                key!(Esc) | ctrl!('c') => {
+                    let _ = self.contents.handle_event(event, cx);
+                    EventResult::Consumed(Some(close_fn))
+                }
+                ctrl!('d') => {
+                    self.scroll_half_page_down();
+                    EventResult::Consumed(None)
+                }
+                ctrl!('u') => {
+                    self.scroll_half_page_up();
+                    EventResult::Consumed(None)
+                }
+                _ => {
+                    let contents_event_result = self.contents.handle_event(event, cx);
 
-                contents_event_result
+                    if self.auto_close {
+                        if let EventResult::Ignored(None) = contents_event_result {
+                            return EventResult::Ignored(Some(close_fn));
+                        }
+                    }
+
+                    contents_event_result
+                }
             }
         }
         // for some events, we want to process them but send ignore, specifically all input except

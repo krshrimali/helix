@@ -47,6 +47,7 @@ use helix_core::{
 use helix_view::{
     editor::Action,
     graphics::{CursorKind, Margin, Modifier, Rect},
+    quickfix::QuickfixItem,
     theme::Style,
     view::ViewPosition,
     Document, DocumentId, Editor,
@@ -79,6 +80,9 @@ impl From<DocumentId> for PathOrId<'_> {
 }
 
 type FileCallback<T> = Box<dyn for<'a> Fn(&'a Editor, &'a T) -> Option<FileLocation<'a>>>;
+
+/// Callback to convert picker items to quickfix items.
+type QuickfixCallback<T> = Box<dyn Fn(&Editor, &T) -> Option<QuickfixItem>>;
 
 /// File path and range of lines (used to align and highlight lines)
 pub type FileLocation<'a> = (PathOrId<'a>, Option<(usize, usize)>);
@@ -266,6 +270,8 @@ pub struct Picker<T: 'static + Send + Sync, D: 'static> {
     read_buffer: Vec<u8>,
     /// Given an item in the picker, return the file path and line number to display.
     file_fn: Option<FileCallback<T>>,
+    /// Callback to convert items to quickfix items for Alt+Q functionality.
+    quickfix_fn: Option<QuickfixCallback<T>>,
     /// An event handler for syntax highlighting the currently previewed file.
     preview_highlight_handler: Sender<Arc<Path>>,
     dynamic_query_handler: Option<Sender<DynamicQueryChange>>,
@@ -392,6 +398,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             preview_cache: HashMap::new(),
             read_buffer: Vec::with_capacity(1024),
             file_fn: None,
+            quickfix_fn: None,
             preview_highlight_handler: PreviewHighlightHandler::<T, D>::default().spawn(),
             dynamic_query_handler: None,
         }
@@ -421,6 +428,16 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         // assumption: if we have a preview we are matching paths... If this is ever
         // not true this could be a separate builder function
         self.matcher.update_config(Config::DEFAULT.match_paths());
+        self
+    }
+
+    /// Set a callback to convert picker items to quickfix items.
+    /// This enables Alt+Q to send all filtered items to the quickfix list.
+    pub fn with_quickfix(
+        mut self,
+        quickfix_fn: impl Fn(&Editor, &T) -> Option<QuickfixItem> + 'static,
+    ) -> Self {
+        self.quickfix_fn = Some(Box::new(quickfix_fn));
         self
     }
 
@@ -503,6 +520,23 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             .snapshot()
             .get_matched_item(self.cursor)
             .map(|item| item.data)
+    }
+
+    /// Collect all currently matched/filtered items as quickfix items.
+    /// Returns None if no quickfix callback is set.
+    fn collect_quickfix_items(&self, editor: &Editor) -> Option<Vec<QuickfixItem>> {
+        let quickfix_fn = self.quickfix_fn.as_ref()?;
+        let snapshot = self.matcher.snapshot();
+        let count = snapshot.matched_item_count();
+
+        let items: Vec<QuickfixItem> = (0..count)
+            .filter_map(|idx| {
+                let item = snapshot.get_matched_item(idx)?;
+                quickfix_fn(editor, item.data)
+            })
+            .collect();
+
+        Some(items)
     }
 
     fn primary_query(&self) -> Arc<str> {
@@ -1142,6 +1176,36 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
             }
             ctrl!('t') => {
                 self.toggle_preview();
+            }
+            alt!('q') => {
+                // Send all filtered items to quickfix list and open the quickfix buffer
+                if let Some(items) = self.collect_quickfix_items(ctx.editor) {
+                    let count = items.len();
+                    if count > 0 {
+                        let title = self.primary_query().to_string();
+                        ctx.editor.quickfix.set_items(items);
+                        if !title.is_empty() {
+                            ctx.editor.quickfix.set_title(title);
+                        }
+                        ctx.editor.set_status(format!(
+                            "Added {} items to quickfix. Use ]q/[q to navigate, Enter to jump.",
+                            count
+                        ));
+                        // Close picker first, then open quickfix buffer
+                        let callback: compositor::Callback = Box::new(|compositor: &mut Compositor, ctx| {
+                            compositor.pop(); // Close the picker
+                            // Open the quickfix buffer
+                            ctx.editor.open_quickfix_buffer(Action::Replace);
+                        });
+                        return EventResult::Consumed(Some(callback));
+                    } else {
+                        ctx.editor.set_status("No items to add to quickfix list");
+                    }
+                } else {
+                    // No quickfix callback for this picker
+                    ctx.editor.set_status("This picker does not support quickfix. Use Space x x to view existing list.");
+                }
+                return close_fn(self);
             }
             _ => {
                 self.prompt_handle_event(event, ctx);

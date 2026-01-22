@@ -121,6 +121,8 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
             "T" => goto_prev_test,
             "p" => goto_prev_paragraph,
             "x" => goto_prev_xml_element,
+            "q" => quickfix_prev,
+            "Q" => quickfix_first,
             "space" => add_newline_above,
         },
         "]" => { "Right bracket"
@@ -136,6 +138,8 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
             "T" => goto_next_test,
             "p" => goto_next_paragraph,
             "x" => goto_next_xml_element,
+            "q" => quickfix_next,
+            "Q" => quickfix_last,
             "space" => add_newline_below,
         },
 
@@ -183,6 +187,9 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
         "A-)" => rotate_selection_contents_forward,
 
         "A-:" => ensure_selections_forward,
+
+        // Enter jumps to location when in quickfix buffer, no-op otherwise
+        "ret" => quickfix_jump_to_location,
 
         "esc" => normal_mode,
         "C-b" | "pageup" => page_up,
@@ -236,6 +243,17 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
             "g" => changed_file_picker,
             "a" => code_action,
             "'" => last_picker,
+            "x" => { "Quickfix"
+                "x" => quickfix_picker,
+                "s" => quickfix_picker_hsplit,
+                "v" => quickfix_picker_vsplit,
+                "n" => quickfix_next,
+                "p" => quickfix_prev,
+                "." => quickfix_first,
+                "," => quickfix_last,
+                "c" => quickfix_clear,
+                "ret" => quickfix_jump_to_location,
+            },
             "G" => { "Debug (experimental)" sticky=true
                 "l" => dap_launch,
                 "r" => dap_restart,
@@ -286,8 +304,13 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
             "R" => replace_selections_with_clipboard,
             "/" => global_search,
             "k" => hover,
+            "K" => show_diagnostics_popup,
+            "h" => { "Hover split"
+                "h" => select_references_to_symbol_under_cursor,
+                "s" => hover_hsplit,
+                "v" => hover_vsplit,
+            },
             "r" => rename_symbol,
-            "h" => select_references_to_symbol_under_cursor,
             "c" => toggle_comments,
             "C" => toggle_block_comments,
             "A-c" => toggle_line_comments,

@@ -9,6 +9,7 @@ use crate::{
     handlers::Handlers,
     info::Info,
     input::KeyEvent,
+    quickfix::QuickfixList,
     register::Registers,
     theme::{self, Theme},
     tree::{self, Tree},
@@ -1247,6 +1248,9 @@ pub struct Editor {
 
     pub mouse_down_range: Option<Range>,
     pub cursor_cache: CursorCache,
+
+    /// The quickfix list for storing and navigating file locations.
+    pub quickfix: QuickfixList,
 }
 
 pub type Motion = Box<dyn Fn(&mut Editor)>;
@@ -1368,6 +1372,7 @@ impl Editor {
             handlers,
             mouse_down_range: None,
             cursor_cache: CursorCache::default(),
+            quickfix: QuickfixList::new(),
         }
     }
 
@@ -1862,7 +1867,7 @@ impl Editor {
         id
     }
 
-    fn new_file_from_document(&mut self, action: Action, doc: Document) -> DocumentId {
+    pub fn new_file_from_document(&mut self, action: Action, doc: Document) -> DocumentId {
         let id = self.new_document(doc);
         self.switch(id, action);
         id
@@ -1893,6 +1898,67 @@ impl Editor {
         doc.apply(&transaction, view.id);
         doc.append_changes_to_history(view);
         Ok(doc_id)
+    }
+
+    /// Find the quickfix buffer document ID if it exists.
+    pub fn quickfix_buffer_id(&self) -> Option<DocumentId> {
+        self.documents.values().find_map(|doc| {
+            if doc.custom_name() == Some(crate::quickfix::QUICKFIX_BUFFER_NAME) {
+                Some(doc.id)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Open or update the quickfix buffer with the current quickfix list contents.
+    /// Returns the document ID of the quickfix buffer.
+    pub fn open_quickfix_buffer(&mut self, action: Action) -> Option<DocumentId> {
+        if self.quickfix.is_empty() {
+            return None;
+        }
+
+        let content = self.quickfix.to_buffer_content();
+
+        // Check if we already have a quickfix buffer
+        if let Some(doc_id) = self.quickfix_buffer_id() {
+            // Update existing buffer content
+            let doc = self.documents.get_mut(&doc_id)?;
+
+            // Replace entire content
+            let view_id = self.tree.focus;
+            doc.ensure_view_init(view_id);
+            let text = doc.text().clone();
+            let len = text.len_chars();
+            let transaction = helix_core::Transaction::change(
+                &text,
+                [(0, len, Some(content.as_str().into()))].into_iter(),
+            )
+            .with_selection(Selection::point(0));
+            doc.apply(&transaction, view_id);
+            doc.reset_modified();
+
+            self.switch(doc_id, action);
+            Some(doc_id)
+        } else {
+            // Create new quickfix buffer
+            let mut doc = Document::from(
+                helix_core::Rope::from(content),
+                None,
+                self.config.clone(),
+                self.syn_loader.clone(),
+            );
+            // Set custom name so it shows as [quickfix] not [scratch]
+            doc.set_custom_name(crate::quickfix::QUICKFIX_BUFFER_NAME);
+
+            let doc_id = self.new_file_from_document(action, doc);
+
+            // Mark as not modified (it's a generated buffer)
+            let doc = self.documents.get_mut(&doc_id)?;
+            doc.reset_modified();
+
+            Some(doc_id)
+        }
     }
 
     pub fn document_id_by_path(&self, path: &Path) -> Option<DocumentId> {

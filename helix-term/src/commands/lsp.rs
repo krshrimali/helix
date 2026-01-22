@@ -22,6 +22,7 @@ use helix_view::{
     document::{DocumentInlayHints, DocumentInlayHintsId},
     editor::Action,
     handlers::lsp::SignatureHelpInvoked,
+    quickfix::QuickfixItem,
     theme::Style,
     Document, View,
 };
@@ -306,6 +307,29 @@ fn diag_picker(
         },
     )
     .with_preview(move |_editor, diag| location_to_file_location(&diag.location))
+    .with_quickfix(|_editor, diag| {
+        // Use LSP line numbers directly (0-indexed)
+        let line = diag.location.range.start.line as usize;
+        let col = diag.location.range.start.character as usize;
+
+        let severity = match diag.diag.severity {
+            Some(DiagnosticSeverity::HINT) => "hint",
+            Some(DiagnosticSeverity::INFORMATION) => "info",
+            Some(DiagnosticSeverity::WARNING) => "warning",
+            Some(DiagnosticSeverity::ERROR) => "error",
+            _ => "diagnostic",
+        };
+
+        Some(
+            QuickfixItem::new(
+                diag.location.uri.clone(),
+                line,
+                col,
+                diag.diag.message.clone(),
+            )
+            .with_kind(severity),
+        )
+    })
     .truncate_start(false)
 }
 
@@ -434,6 +458,14 @@ pub fn symbol_picker(cx: &mut Context) {
                 },
             )
             .with_preview(move |_editor, item| location_to_file_location(&item.location))
+            .with_quickfix(|_editor, item| {
+                Some(QuickfixItem::new(
+                    item.location.uri.clone(),
+                    item.location.range.start.line as usize,
+                    item.location.range.start.character as usize,
+                    item.symbol.name.clone(),
+                ))
+            })
             .truncate_start(false);
 
             compositor.push(Box::new(overlaid(picker)))
@@ -560,6 +592,14 @@ pub fn workspace_symbol_picker(cx: &mut Context) {
         },
     )
     .with_preview(|_editor, item| location_to_file_location(&item.location))
+    .with_quickfix(|_editor, item| {
+        Some(QuickfixItem::new(
+            item.location.uri.clone(),
+            item.location.range.start.line as usize,
+            item.location.range.start.character as usize,
+            item.symbol.name.clone(),
+        ))
+    })
     .with_dynamic_query(get_symbols, None)
     .truncate_start(false);
 
@@ -878,7 +918,17 @@ fn goto_impl(editor: &mut Editor, compositor: &mut Compositor, locations: Vec<Lo
             let picker = Picker::new(columns, 0, locations, cwdir, |cx, location, action| {
                 jump_to_location(cx.editor, location, action)
             })
-            .with_preview(|_editor, location| location_to_file_location(location));
+            .with_preview(|_editor, location| location_to_file_location(location))
+            .with_quickfix(|_editor, location| {
+                Some(QuickfixItem::new(
+                    location.uri.clone(),
+                    location.range.start.line as usize,
+                    location.range.start.character as usize,
+                    location.uri.as_path()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| location.uri.to_string()),
+                ))
+            });
             compositor.push(Box::new(overlaid(picker)));
         }
     }
@@ -1087,6 +1137,144 @@ pub fn hover(cx: &mut Context) {
         };
         Ok(Callback::EditorCompositor(Box::new(call)))
     });
+}
+
+/// Helper function to request hover and open it in a split
+fn hover_split(cx: &mut Context, action: Action) {
+    use ui::lsp::hover::hover_contents_to_string;
+
+    let (view, doc) = current!(cx.editor);
+    if doc
+        .language_servers_with_feature(LanguageServerFeature::Hover)
+        .count()
+        == 0
+    {
+        cx.editor
+            .set_error("No configured language server supports hover");
+        return;
+    }
+
+    let mut seen_language_servers = HashSet::new();
+    let mut futures: FuturesOrdered<_> = doc
+        .language_servers_with_feature(LanguageServerFeature::Hover)
+        .filter(|ls| seen_language_servers.insert(ls.id()))
+        .map(|language_server| {
+            let server_name = language_server.name().to_string();
+            let pos = doc.position(view.id, language_server.offset_encoding());
+            let request = language_server
+                .text_document_hover(doc.identifier(), pos, None)
+                .unwrap();
+
+            async move { anyhow::Ok((server_name, request.await?)) }
+        })
+        .collect();
+
+    cx.jobs.callback(async move {
+        let mut hovers: Vec<(String, lsp::Hover)> = Vec::new();
+
+        while let Some(response) = futures.next().await {
+            match response {
+                Ok((server_name, Some(hover))) => hovers.push((server_name, hover)),
+                Ok(_) => (),
+                Err(err) => log::error!("Error requesting hover: {err}"),
+            }
+        }
+
+        let call = move |editor: &mut Editor, _compositor: &mut Compositor| {
+            if hovers.is_empty() {
+                editor.set_status("No hover results available.");
+                return;
+            }
+
+            // Combine all hover contents into a single markdown string
+            let mut content = String::new();
+            for (i, (server_name, hover)) in hovers.iter().enumerate() {
+                if hovers.len() > 1 {
+                    if i > 0 {
+                        content.push_str("\n\n---\n\n");
+                    }
+                    content.push_str(&format!("## {}\n\n", server_name));
+                }
+                content.push_str(&hover_contents_to_string(hover.contents.clone()));
+            }
+
+            // Create a new document with the hover content
+            let rope = helix_core::Rope::from(content);
+            let mut doc = helix_view::Document::from(
+                rope,
+                None,
+                editor.config.clone(),
+                editor.syn_loader.clone(),
+            );
+
+            // Set the document name and language
+            doc.set_custom_name("[hover]");
+            let loader = editor.syn_loader.load();
+            let _ = doc.set_language_by_language_id("markdown", &loader);
+
+            // Create the document and switch to it
+            let doc_id = editor.new_file_from_document(action, doc);
+
+            // Mark as not modified
+            if let Some(doc) = editor.documents.get_mut(&doc_id) {
+                doc.reset_modified();
+            }
+        };
+        Ok(Callback::EditorCompositor(Box::new(call)))
+    });
+}
+
+/// Open hover documentation in a horizontal split
+pub fn hover_hsplit(cx: &mut Context) {
+    hover_split(cx, Action::HorizontalSplit);
+}
+
+/// Open hover documentation in a vertical split
+pub fn hover_vsplit(cx: &mut Context) {
+    hover_split(cx, Action::VerticalSplit);
+}
+
+/// Show diagnostics at the cursor position in a popup.
+/// If the popup is already open, toggle its focus state.
+pub fn show_diagnostics_popup(cx: &mut Context) {
+    use ui::lsp::diagnostics::DiagnosticsPopup;
+
+    // Use a callback to check for existing popup
+    let call = move |editor: &mut Editor, compositor: &mut Compositor| {
+        // Check if diagnostics popup already exists - if so, toggle focus
+        if let Some(popup) = compositor.find_id::<Popup<DiagnosticsPopup>>(DiagnosticsPopup::ID) {
+            popup.toggle_focused();
+            if popup.is_focused() {
+                editor.set_status("Diagnostics popup focused. Press Esc to exit.");
+            } else {
+                editor.set_status("Diagnostics popup unfocused.");
+            }
+            return;
+        }
+
+        // Get diagnostics for cursor position
+        let (view, doc) = current!(editor);
+        let text = doc.text().slice(..);
+        let cursor_pos = doc.selection(view.id).primary().cursor(text);
+
+        let diagnostics: Vec<_> = doc
+            .diagnostics()
+            .iter()
+            .filter(|diag| diag.range.start <= cursor_pos && cursor_pos <= diag.range.end)
+            .collect();
+
+        if diagnostics.is_empty() {
+            editor.set_status("No diagnostics at cursor position.");
+            return;
+        }
+
+        // Create new popup
+        let contents = DiagnosticsPopup::new(diagnostics, editor.syn_loader.clone());
+        let popup = Popup::new(DiagnosticsPopup::ID, contents).auto_close(true);
+        compositor.replace_or_push(DiagnosticsPopup::ID, popup);
+    };
+
+    cx.jobs.callback(async move { Ok(Callback::EditorCompositor(Box::new(call))) });
 }
 
 pub fn rename_symbol(cx: &mut Context) {

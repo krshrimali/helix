@@ -42,7 +42,7 @@ use helix_core::{
     textobject,
     unicode::width::UnicodeWidthChar,
     visual_offset_from_block, Deletion, LineEnding, Position, Range, Rope, RopeReader, RopeSlice,
-    Selection, SmallVec, Syntax, Tendril, Transaction,
+    Selection, SmallVec, Syntax, Tendril, Transaction, Uri,
 };
 use helix_view::{
     document::{FormatterError, Mode, SCRATCH_BUFFER_NAME},
@@ -51,6 +51,7 @@ use helix_view::{
     info::Info,
     input::KeyEvent,
     keyboard::KeyCode,
+    quickfix::QuickfixItem,
     theme::Style,
     tree,
     view::View,
@@ -420,6 +421,15 @@ impl MappableCommand {
         diagnostics_picker, "Open diagnostic picker",
         workspace_diagnostics_picker, "Open workspace diagnostic picker",
         last_picker, "Open last picker",
+        quickfix_picker, "Open quickfix list buffer",
+        quickfix_picker_hsplit, "Open quickfix list in horizontal split",
+        quickfix_picker_vsplit, "Open quickfix list in vertical split",
+        quickfix_next, "Go to next quickfix item",
+        quickfix_prev, "Go to previous quickfix item",
+        quickfix_first, "Go to first quickfix item",
+        quickfix_last, "Go to last quickfix item",
+        quickfix_clear, "Clear quickfix list",
+        quickfix_jump_to_location, "Jump to quickfix item at cursor line",
         insert_at_line_start, "Insert at start of line",
         insert_at_line_end, "Insert at end of line",
         open_below, "Open new line below selection",
@@ -517,6 +527,9 @@ impl MappableCommand {
         remove_primary_selection, "Remove primary selection",
         completion, "Invoke completion popup",
         hover, "Show docs for item under cursor",
+        hover_hsplit, "Show docs in horizontal split",
+        hover_vsplit, "Show docs in vertical split",
+        show_diagnostics_popup, "Show diagnostics for cursor position in popup",
         toggle_comments, "Comment/uncomment selections",
         toggle_line_comments, "Line comment/uncomment selections",
         toggle_block_comments, "Block comment/uncomment selections",
@@ -2457,13 +2470,17 @@ fn global_search(cx: &mut Context) {
         path: PathBuf,
         /// 0 indexed lines
         line_num: usize,
+        /// Content of the matched line (trimmed)
+        line_content: String,
     }
 
     impl FileResult {
-        fn new(path: &Path, line_num: usize) -> Self {
+        fn new(path: &Path, line_num: usize, line_content: &str) -> Self {
             Self {
                 path: path.to_path_buf(),
                 line_num,
+                // Trim and limit line content to avoid huge lines
+                line_content: line_content.trim().chars().take(200).collect(),
             }
         }
     }
@@ -2588,9 +2605,9 @@ fn global_search(cx: &mut Context) {
                         };
 
                         let mut stop = false;
-                        let sink = sinks::UTF8(|line_num, _line_content| {
+                        let sink = sinks::UTF8(|line_num, line_content| {
                             stop = injector
-                                .push(FileResult::new(entry.path(), line_num as usize - 1))
+                                .push(FileResult::new(entry.path(), line_num as usize - 1, line_content))
                                 .is_err();
 
                             Ok(!stop)
@@ -2674,6 +2691,10 @@ fn global_search(cx: &mut Context) {
     )
     .with_preview(|_editor, FileResult { path, line_num, .. }| {
         Some((path.as_path().into(), Some((*line_num, *line_num))))
+    })
+    .with_quickfix(|_editor, FileResult { path, line_num, line_content }| {
+        let uri = Uri::from(path.clone());
+        Some(QuickfixItem::new(uri, *line_num, 0, line_content.clone()))
     })
     .with_history_register(Some(reg))
     .with_dynamic_query(get_files, Some(275));
@@ -3236,6 +3257,19 @@ fn buffer_picker(cx: &mut Context) {
             (cursor_line, cursor_line)
         });
         Some((meta.id.into(), lines))
+    })
+    .with_quickfix(|editor, meta| {
+        let doc = editor.documents.get(&meta.id)?;
+        let path = doc.path()?;
+        let line = doc.selections().values().next().map(|selection| {
+            selection.primary().cursor_line(doc.text().slice(..))
+        }).unwrap_or(0);
+        Some(QuickfixItem::new(
+            Uri::from(path.clone()),
+            line,
+            0,
+            path.display().to_string(),
+        ))
     });
     cx.push_layer(Box::new(overlaid(picker)));
 }
@@ -3327,8 +3361,200 @@ fn jumplist_picker(cx: &mut Context) {
         let doc = &editor.documents.get(&meta.id)?;
         let line = meta.selection.primary().cursor_line(doc.text().slice(..));
         Some((meta.id.into(), Some((line, line))))
+    })
+    .with_quickfix(|editor, meta| {
+        let doc = editor.documents.get(&meta.id)?;
+        let path = doc.path()?;
+        let line = meta.selection.primary().cursor_line(doc.text().slice(..));
+        Some(QuickfixItem::new(
+            Uri::from(path.clone()),
+            line,
+            0,
+            meta.text.clone(),
+        ))
     });
     cx.push_layer(Box::new(overlaid(picker)));
+}
+
+fn quickfix_picker(cx: &mut Context) {
+    if cx.editor.quickfix.is_empty() {
+        cx.editor.set_status("Quickfix list is empty");
+        return;
+    }
+
+    // Open the quickfix buffer - this shows quickfix as a normal buffer
+    // where users can use all normal Helix keymaps (search, navigation, etc.)
+    if cx.editor.open_quickfix_buffer(Action::Replace).is_none() {
+        cx.editor.set_error("Failed to open quickfix buffer");
+    }
+}
+
+fn quickfix_picker_hsplit(cx: &mut Context) {
+    if cx.editor.quickfix.is_empty() {
+        cx.editor.set_status("Quickfix list is empty");
+        return;
+    }
+
+    // Open the quickfix buffer in a horizontal split (below current buffer)
+    if cx.editor.open_quickfix_buffer(Action::HorizontalSplit).is_none() {
+        cx.editor.set_error("Failed to open quickfix buffer");
+    }
+}
+
+fn quickfix_picker_vsplit(cx: &mut Context) {
+    if cx.editor.quickfix.is_empty() {
+        cx.editor.set_status("Quickfix list is empty");
+        return;
+    }
+
+    // Open the quickfix buffer in a vertical split (to the right of current buffer)
+    if cx.editor.open_quickfix_buffer(Action::VerticalSplit).is_none() {
+        cx.editor.set_error("Failed to open quickfix buffer");
+    }
+}
+
+/// Jump to the quickfix item at the current cursor line.
+/// This is intended to be used from within the quickfix buffer.
+/// When called outside the quickfix buffer, this is a no-op (silent).
+/// When there are multiple views (splits), the file opens in another view,
+/// preserving the quickfix buffer in its current view.
+fn quickfix_jump_to_location(cx: &mut Context) {
+    // Check if we're in the quickfix buffer
+    let (view, doc) = current!(cx.editor);
+    let is_quickfix_buffer = doc.custom_name() == Some(helix_view::quickfix::QUICKFIX_BUFFER_NAME);
+
+    if !is_quickfix_buffer {
+        // Not in quickfix buffer - silent no-op to allow Enter binding in normal mode
+        return;
+    }
+
+    // Get the current line number
+    let text = doc.text().slice(..);
+    let cursor_pos = doc.selection(view.id).primary().cursor(text);
+    let current_line = text.char_to_line(cursor_pos);
+
+    // Look up the quickfix item for this line
+    let item = cx.editor.quickfix.item_at_line(current_line).cloned();
+
+    if let Some(item) = item {
+        // Update the quickfix current index
+        if let Some(idx) = cx.editor.quickfix.line_to_item_index(current_line) {
+            cx.editor.quickfix.set_current(idx);
+        }
+
+        // Jump to the location
+        if let Some(path) = item.path() {
+            let path = path.to_path_buf();
+
+            // Check if there are multiple views (splits)
+            let view_count = cx.editor.tree.views().count();
+            if view_count > 1 {
+                // Switch to the next view before opening the file
+                // This preserves the quickfix buffer in its current view
+                let next_view_id = cx.editor.tree.next();
+                cx.editor.focus(next_view_id);
+            }
+
+            if let Err(err) = cx.editor.open(&path, Action::Replace) {
+                cx.editor.set_error(format!("Failed to open file: {}", err));
+                return;
+            }
+            let scrolloff = cx.editor.config().scrolloff;
+            let (view, doc) = current!(cx.editor);
+            let text = doc.text().slice(..);
+            let line = item.line.min(text.len_lines().saturating_sub(1));
+            let line_start = text.line_to_char(line);
+            let col = item.col.min(
+                text.line(line)
+                    .len_chars()
+                    .saturating_sub(1)
+                    .max(0),
+            );
+            let pos = line_start + col;
+            doc.set_selection(view.id, Selection::point(pos));
+            view.ensure_cursor_in_view_center(doc, scrolloff);
+        } else {
+            cx.editor.set_error("Quickfix item has no valid path");
+        }
+    } else {
+        cx.editor.set_status("No quickfix item on this line");
+    }
+}
+
+fn quickfix_next(cx: &mut Context) {
+    let count = cx.count();
+    if cx.editor.quickfix.is_empty() {
+        cx.editor.set_status("Quickfix list is empty");
+        return;
+    }
+    cx.editor.quickfix.forward(count);
+    goto_quickfix_item(cx);
+}
+
+fn quickfix_prev(cx: &mut Context) {
+    let count = cx.count();
+    if cx.editor.quickfix.is_empty() {
+        cx.editor.set_status("Quickfix list is empty");
+        return;
+    }
+    cx.editor.quickfix.backward(count);
+    goto_quickfix_item(cx);
+}
+
+fn quickfix_first(cx: &mut Context) {
+    if cx.editor.quickfix.is_empty() {
+        cx.editor.set_status("Quickfix list is empty");
+        return;
+    }
+    cx.editor.quickfix.first();
+    goto_quickfix_item(cx);
+}
+
+fn quickfix_last(cx: &mut Context) {
+    if cx.editor.quickfix.is_empty() {
+        cx.editor.set_status("Quickfix list is empty");
+        return;
+    }
+    cx.editor.quickfix.last();
+    goto_quickfix_item(cx);
+}
+
+fn quickfix_clear(cx: &mut Context) {
+    cx.editor.quickfix.clear();
+    cx.editor.set_status("Quickfix list cleared");
+}
+
+/// Navigate to the current quickfix item
+fn goto_quickfix_item(cx: &mut Context) {
+    let item = match cx.editor.quickfix.current() {
+        Some(item) => item.clone(),
+        None => return,
+    };
+
+    let status = cx.editor.quickfix.status();
+    let scrolloff = cx.editor.config().scrolloff;
+
+    if let Some(path) = item.path() {
+        if let Err(err) = cx.editor.open(path, Action::Replace) {
+            cx.editor.set_error(format!("Failed to open file: {}", err));
+            return;
+        }
+        let (view, doc) = current!(cx.editor);
+        let text = doc.text().slice(..);
+        let line = item.line.min(text.len_lines().saturating_sub(1));
+        let line_start = text.line_to_char(line);
+        let col = item.col.min(
+            text.line(line)
+                .len_chars()
+                .saturating_sub(1)
+                .max(0),
+        );
+        let pos = line_start + col;
+        doc.set_selection(view.id, Selection::point(pos));
+        view.ensure_cursor_in_view_center(doc, scrolloff);
+    }
+
+    cx.editor.set_status(format!("{} {}", status, item.text));
 }
 
 fn changed_file_picker(cx: &mut Context) {

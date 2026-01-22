@@ -29,6 +29,8 @@ pub use prompt::{Prompt, PromptEvent};
 pub use spinner::{ProgressSpinners, Spinner};
 pub use text::Text;
 
+use helix_core::Uri;
+use helix_view::quickfix::QuickfixItem;
 use helix_view::Editor;
 use tui::text::{Span, Spans};
 
@@ -278,7 +280,15 @@ pub fn file_picker(editor: &Editor, root: PathBuf) -> FilePicker {
             cx.editor.set_error(err);
         }
     })
-    .with_preview(|_editor, path| Some((path.as_path().into(), None)));
+    .with_preview(|_editor, path| Some((path.as_path().into(), None)))
+    .with_quickfix(|_editor, path| {
+        Some(QuickfixItem::new(
+            Uri::from(path.clone()),
+            0,
+            0,
+            path.display().to_string(),
+        ))
+    });
     let injector = picker.injector();
     let timeout = std::time::Instant::now() + std::time::Duration::from_millis(30);
 
