@@ -91,6 +91,8 @@ pub enum PickerAction {
     SelectHorizontalSplit,
     /// Select and open in vertical split
     SelectVerticalSplit,
+    /// Send filtered items to quickfix list
+    SendToQuickfix,
 }
 
 impl std::str::FromStr for PickerAction {
@@ -113,6 +115,7 @@ impl std::str::FromStr for PickerAction {
             "select_alternate" => SelectAlternate,
             "select_horizontal_split" => SelectHorizontalSplit,
             "select_vertical_split" => SelectVerticalSplit,
+            "send_to_quickfix" => SendToQuickfix,
             _ => anyhow::bail!("Invalid picker action '{}'", s),
         })
     }
@@ -136,6 +139,7 @@ impl std::fmt::Display for PickerAction {
             SelectAlternate => "select_alternate",
             SelectHorizontalSplit => "select_horizontal_split",
             SelectVerticalSplit => "select_vertical_split",
+            SendToQuickfix => "send_to_quickfix",
         };
         write!(f, "{}", s)
     }
@@ -1316,72 +1320,76 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
                         };
                         self.prompt.set_line(completion, ctx.editor);
 
-                    // Inserting from the history register is a paste.
-                    self.handle_prompt_change(true);
-                } else {
+                        // Inserting from the history register is a paste.
+                        self.handle_prompt_change(true);
+                    } else {
+                        if let Some(option) = self.selection() {
+                            (self.callback_fn)(ctx, option, self.default_action);
+                        }
+                        if let Some(history_register) = self.prompt.history_register() {
+                            if let Err(err) = ctx
+                                .editor
+                                .registers
+                                .push(history_register, self.primary_query().to_string())
+                            {
+                                ctx.editor.set_error(err.to_string());
+                            }
+                        }
+                        return close_fn(self);
+                    }
+                }
+                SelectAlternate => {
                     if let Some(option) = self.selection() {
                         (self.callback_fn)(ctx, option, self.default_action);
                     }
-                    if let Some(history_register) = self.prompt.history_register() {
-                        if let Err(err) = ctx
-                            .editor
-                            .registers
-                            .push(history_register, self.primary_query().to_string())
-                        {
-                            ctx.editor.set_error(err.to_string());
+                }
+                SelectHorizontalSplit => {
+                    if let Some(option) = self.selection() {
+                        (self.callback_fn)(ctx, option, Action::HorizontalSplit);
+                    }
+                    return close_fn(self);
+                }
+                SelectVerticalSplit => {
+                    if let Some(option) = self.selection() {
+                        (self.callback_fn)(ctx, option, Action::VerticalSplit);
+                    }
+                    return close_fn(self);
+                }
+                SendToQuickfix => {
+                    // Send all filtered items to quickfix list and open the quickfix buffer
+                    if let Some(items) = self.collect_quickfix_items(ctx.editor) {
+                        let count = items.len();
+                        if count > 0 {
+                            let title = self.primary_query().to_string();
+                            ctx.editor.quickfix.set_items(items);
+                            if !title.is_empty() {
+                                ctx.editor.quickfix.set_title(title);
+                            }
+                            ctx.editor.set_status(format!(
+                                "Added {} items to quickfix. Use ]q/[q to navigate, Enter to jump.",
+                                count
+                            ));
+                            // Close picker first, then open quickfix buffer in bottom split
+                            let callback: compositor::Callback = Box::new(|compositor: &mut Compositor, ctx| {
+                                compositor.pop(); // Close the picker
+                                // Open the quickfix buffer in a horizontal split (bottom)
+                                ctx.editor.open_quickfix_buffer(Action::HorizontalSplit);
+                            });
+                            return EventResult::Consumed(Some(callback));
+                        } else {
+                            ctx.editor.set_status("No items to add to quickfix list");
                         }
+                    } else {
+                        // No quickfix callback for this picker
+                        ctx.editor.set_status("This picker does not support quickfix. Use Space x x to view existing list.");
                     }
                     return close_fn(self);
                 }
             }
-            ctrl!('s') => {
-                if let Some(option) = self.selection() {
-                    (self.callback_fn)(ctx, option, Action::HorizontalSplit);
-                }
-                return close_fn(self);
-            }
-            ctrl!('v') => {
-                if let Some(option) = self.selection() {
-                    (self.callback_fn)(ctx, option, Action::VerticalSplit);
-                }
-                return close_fn(self);
-            }
-            ctrl!('t') => {
-                self.toggle_preview();
-            }
-            alt!('q') => {
-                // Send all filtered items to quickfix list and open the quickfix buffer
-                if let Some(items) = self.collect_quickfix_items(ctx.editor) {
-                    let count = items.len();
-                    if count > 0 {
-                        let title = self.primary_query().to_string();
-                        ctx.editor.quickfix.set_items(items);
-                        if !title.is_empty() {
-                            ctx.editor.quickfix.set_title(title);
-                        }
-                        ctx.editor.set_status(format!(
-                            "Added {} items to quickfix. Use ]q/[q to navigate, Enter to jump.",
-                            count
-                        ));
-                        // Close picker first, then open quickfix buffer
-                        let callback: compositor::Callback = Box::new(|compositor: &mut Compositor, ctx| {
-                            compositor.pop(); // Close the picker
-                            // Open the quickfix buffer
-                            ctx.editor.open_quickfix_buffer(Action::Replace);
-                        });
-                        return EventResult::Consumed(Some(callback));
-                    } else {
-                        ctx.editor.set_status("No items to add to quickfix list");
-                    }
-                } else {
-                    // No quickfix callback for this picker
-                    ctx.editor.set_status("This picker does not support quickfix. Use Space x x to view existing list.");
-                }
-                return close_fn(self);
-            }
-            _ => {
-                self.prompt_handle_event(event, ctx);
-            }
+            EventResult::Consumed(None)
+        } else {
+            // Key not found in picker keymap, pass to prompt for text input
+            self.prompt_handle_event(event, ctx)
         }
     }
 
