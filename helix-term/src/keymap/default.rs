@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
 use super::macros::keymap;
-use super::{KeyTrie, Mode};
+use super::{KeyTrie, Mode, PickerAction, PickerKeymap};
 use helix_core::hashmap;
+use helix_view::input::{KeyCode, KeyEvent, KeyModifiers};
 
-pub fn default() -> HashMap<Mode, KeyTrie> {
+pub fn default() -> (HashMap<Mode, KeyTrie>, PickerKeymap) {
     let normal = keymap!({ "Normal mode"
         "h" | "left" => move_char_left,
         "j" | "down" => move_visual_line_down,
@@ -430,9 +431,50 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
         "home" => goto_line_start,
         "end" => goto_line_end_newline,
     });
-    hashmap!(
+    // Picker keymap: maps keys directly to picker actions
+    let picker = hashmap!(
+        // Navigation
+        KeyEvent { code: KeyCode::Up, modifiers: KeyModifiers::SHIFT, } => PickerAction::MovePrev,
+        KeyEvent { code: KeyCode::Up, modifiers: KeyModifiers::NONE, } => PickerAction::MovePrev,
+        KeyEvent { code: KeyCode::Char('p'), modifiers: KeyModifiers::CONTROL, } => PickerAction::MovePrev,
+        KeyEvent { code: KeyCode::Tab, modifiers: KeyModifiers::SHIFT, } => PickerAction::MovePrev,
+
+        KeyEvent { code: KeyCode::Down, modifiers: KeyModifiers::NONE, } => PickerAction::MoveNext,
+        KeyEvent { code: KeyCode::Char('n'), modifiers: KeyModifiers::CONTROL, } => PickerAction::MoveNext,
+        KeyEvent { code: KeyCode::Tab, modifiers: KeyModifiers::NONE, } => PickerAction::MoveNext,
+
+        KeyEvent { code: KeyCode::PageUp, modifiers: KeyModifiers::NONE, } => PickerAction::PageUp,
+        KeyEvent { code: KeyCode::Char('u'), modifiers: KeyModifiers::CONTROL, } => PickerAction::PageUp,
+
+        KeyEvent { code: KeyCode::PageDown, modifiers: KeyModifiers::NONE, } => PickerAction::PageDown,
+        KeyEvent { code: KeyCode::Char('d'), modifiers: KeyModifiers::CONTROL, } => PickerAction::PageDown,
+
+        KeyEvent { code: KeyCode::Home, modifiers: KeyModifiers::NONE, } => PickerAction::MoveToStart,
+        KeyEvent { code: KeyCode::End, modifiers: KeyModifiers::NONE, } => PickerAction::MoveToEnd,
+
+        // Preview scrolling
+        KeyEvent { code: KeyCode::Up, modifiers: KeyModifiers::ALT, } => PickerAction::ScrollPreviewUp,
+        KeyEvent { code: KeyCode::Char('y'), modifiers: KeyModifiers::CONTROL, } => PickerAction::ScrollPreviewUp,
+
+        KeyEvent { code: KeyCode::Down, modifiers: KeyModifiers::ALT, } => PickerAction::ScrollPreviewDown,
+        KeyEvent { code: KeyCode::Char('e'), modifiers: KeyModifiers::CONTROL, } => PickerAction::ScrollPreviewDown,
+
+        // Actions
+        KeyEvent { code: KeyCode::Char('t'), modifiers: KeyModifiers::CONTROL, } => PickerAction::TogglePreview,
+
+        KeyEvent { code: KeyCode::Esc, modifiers: KeyModifiers::NONE, } => PickerAction::Close,
+        KeyEvent { code: KeyCode::Char('c'), modifiers: KeyModifiers::CONTROL, } => PickerAction::Close,
+
+        KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::NONE, } => PickerAction::Select,
+        KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::ALT, } => PickerAction::SelectAlternate,
+
+        KeyEvent { code: KeyCode::Char('s'), modifiers: KeyModifiers::CONTROL, } => PickerAction::SelectHorizontalSplit,
+        KeyEvent { code: KeyCode::Char('v'), modifiers: KeyModifiers::CONTROL, } => PickerAction::SelectVerticalSplit,
+    );
+
+    (hashmap!(
         Mode::Normal => normal,
         Mode::Select => select,
         Mode::Insert => insert,
-    )
+    ), picker)
 }

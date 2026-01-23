@@ -297,6 +297,8 @@ pub struct Config {
     pub scrolloff: usize,
     /// Number of lines to scroll at once. Defaults to 3
     pub scroll_lines: isize,
+    /// Enable scrolling in picker preview panels. Defaults to true.
+    pub picker_preview_scroll: bool,
     /// Mouse support. Defaults to true.
     pub mouse: bool,
     /// Shell to use for shell commands. Defaults to ["cmd", "/C"] on Windows and ["sh", "-c"] otherwise.
@@ -633,6 +635,7 @@ pub struct ModeConfig {
     pub normal: String,
     pub insert: String,
     pub select: String,
+    pub picker: String,
 }
 
 impl Default for ModeConfig {
@@ -641,6 +644,7 @@ impl Default for ModeConfig {
             normal: String::from("NOR"),
             insert: String::from("INS"),
             select: String::from("SEL"),
+            picker: String::from("PICK"),
         }
     }
 }
@@ -1086,6 +1090,7 @@ impl Default for Config {
         Self {
             scrolloff: 5,
             scroll_lines: 3,
+            picker_preview_scroll: true,
             mouse: true,
             shell: if cfg!(windows) {
                 vec!["cmd".to_owned(), "/C".to_owned()]

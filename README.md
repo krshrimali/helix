@@ -16,6 +16,64 @@
 
 </div>
 
+## Custom Features Added
+
+| Feature | Description | Keyboard Shortcuts | Mouse Support | Configuration |
+|---------|-------------|-------------------|---------------|---------------|
+| **Picker Preview Scrolling** | Scroll through file previews in pickers without changing selection | `Alt+Up`/`Alt+Down` or `Ctrl+y`/`Ctrl+e` | Scroll wheel over preview panel | `picker-preview-scroll = true` (default) |
+| **Customizable Picker Keybindings** | Fully customizable keybindings for all picker actions | See picker keybindings section below | N/A | Configure via `[picker-keys]` in config.toml |
+
+### Picker Keybindings
+
+The picker now supports fully customizable keybindings! You can customize any picker action in your `config.toml`:
+
+```toml
+[picker-keys]
+# Navigation
+up = "move_prev"
+down = "move_next"
+"C-n" = "move_next"
+"C-p" = "move_prev"
+"C-d" = "page_down"
+"C-u" = "page_up"
+home = "move_to_start"
+end = "move_to_end"
+
+# Preview scrolling
+"A-up" = "scroll_preview_up"
+"A-down" = "scroll_preview_down"
+"C-y" = "scroll_preview_up"
+"C-e" = "scroll_preview_down"
+
+# Actions
+"C-t" = "toggle_preview"
+esc = "close"
+"C-c" = "close"
+ret = "select"
+"A-ret" = "select_alternate"
+"C-s" = "select_horizontal_split"
+"C-v" = "select_vertical_split"
+```
+
+#### Available Picker Actions
+
+| Action | Description |
+|--------|-------------|
+| `move_prev` | Move to previous entry |
+| `move_next` | Move to next entry |
+| `page_up` | Move one page up |
+| `page_down` | Move one page down |
+| `move_to_start` | Move to first entry |
+| `move_to_end` | Move to last entry |
+| `scroll_preview_up` | Scroll preview panel up |
+| `scroll_preview_down` | Scroll preview panel down |
+| `toggle_preview` | Toggle preview visibility |
+| `close` | Close the picker |
+| `select` | Select current entry |
+| `select_alternate` | Select with alternate action |
+| `select_horizontal_split` | Open in horizontal split |
+| `select_vertical_split` | Open in vertical split |
+
 ![Screenshot](./screenshot.png)
 
 A [Kakoune](https://github.com/mawww/kakoune) / [Neovim](https://github.com/neovim/neovim) inspired editor, written in Rust.

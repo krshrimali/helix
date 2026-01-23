@@ -170,10 +170,13 @@ impl Context<'_> {
     /// Waits on all pending jobs, and then tries to flush all pending write
     /// operations for all documents.
     pub fn block_try_flush_writes(&mut self) -> anyhow::Result<()> {
+        use std::collections::HashMap;
+        let empty_picker_keymap = HashMap::new();
         compositor::Context {
             editor: self.editor,
             jobs: self.jobs,
             scroll: None,
+            picker_keymap: &empty_picker_keymap,
         }
         .block_try_flush_writes()
     }
@@ -251,10 +254,13 @@ impl MappableCommand {
         match &self {
             Self::Typable { name, args, doc: _ } => {
                 if let Some(command) = typed::TYPABLE_COMMAND_MAP.get(name.as_str()) {
+                    use std::collections::HashMap;
+                    let empty_picker_keymap = HashMap::new();
                     let mut cx = compositor::Context {
                         editor: cx.editor,
                         jobs: cx.jobs,
                         scroll: None,
+                        picker_keymap: &empty_picker_keymap,
                     };
                     if let Err(e) =
                         typed::execute_command(&mut cx, command, args, PromptEvent::Validate)
@@ -5041,7 +5047,7 @@ pub(crate) fn paste_bracketed_value(cx: &mut Context, contents: String) {
     let count = cx.count();
     let paste = match cx.editor.mode {
         Mode::Insert | Mode::Select => Paste::Cursor,
-        Mode::Normal => Paste::Before,
+        Mode::Normal | Mode::Picker => Paste::Before,
     };
     let (view, doc) = current!(cx.editor);
     paste_impl(&[contents], doc, view, paste, count, cx.editor.mode);

@@ -1,5 +1,5 @@
 use crate::keymap;
-use crate::keymap::{merge_keys, KeyTrie};
+use crate::keymap::{merge_keys, KeyTrie, PickerKeymap};
 use helix_loader::merge_toml_values;
 use helix_view::{document::Mode, theme};
 use serde::Deserialize;
@@ -13,6 +13,7 @@ use toml::de::Error as TomlError;
 pub struct Config {
     pub theme: Option<theme::Config>,
     pub keys: HashMap<Mode, KeyTrie>,
+    pub picker_keys: PickerKeymap,
     pub editor: helix_view::editor::Config,
 }
 
@@ -21,14 +22,17 @@ pub struct Config {
 pub struct ConfigRaw {
     pub theme: Option<theme::Config>,
     pub keys: Option<HashMap<Mode, KeyTrie>>,
+    pub picker_keys: Option<PickerKeymap>,
     pub editor: Option<toml::Value>,
 }
 
 impl Default for Config {
     fn default() -> Config {
+        let (keys, picker_keys) = keymap::default();
         Config {
             theme: None,
-            keys: keymap::default(),
+            keys,
+            picker_keys,
             editor: helix_view::editor::Config::default(),
         }
     }
@@ -66,12 +70,18 @@ impl Config {
             local.and_then(|file| toml::from_str(&file).map_err(ConfigLoadError::BadConfig));
         let res = match (global_config, local_config) {
             (Ok(global), Ok(local)) => {
-                let mut keys = keymap::default();
+                let (mut keys, mut picker_keys) = keymap::default();
                 if let Some(global_keys) = global.keys {
                     merge_keys(&mut keys, global_keys)
                 }
                 if let Some(local_keys) = local.keys {
                     merge_keys(&mut keys, local_keys)
+                }
+                if let Some(global_picker) = global.picker_keys {
+                    picker_keys.extend(global_picker);
+                }
+                if let Some(local_picker) = local.picker_keys {
+                    picker_keys.extend(local_picker);
                 }
 
                 let editor = match (global.editor, local.editor) {
@@ -87,6 +97,7 @@ impl Config {
                 Config {
                     theme: local.theme.or(global.theme),
                     keys,
+                    picker_keys,
                     editor,
                 }
             }
@@ -96,13 +107,17 @@ impl Config {
                 return Err(ConfigLoadError::BadConfig(err))
             }
             (Ok(config), Err(_)) | (Err(_), Ok(config)) => {
-                let mut keys = keymap::default();
+                let (mut keys, mut picker_keys) = keymap::default();
                 if let Some(keymap) = config.keys {
                     merge_keys(&mut keys, keymap);
+                }
+                if let Some(picker_keymap) = config.picker_keys {
+                    picker_keys.extend(picker_keymap);
                 }
                 Config {
                     theme: config.theme,
                     keys,
+                    picker_keys,
                     editor: config.editor.map_or_else(
                         || Ok(helix_view::editor::Config::default()),
                         |val| val.try_into().map_err(ConfigLoadError::BadConfig),

@@ -2,9 +2,7 @@ mod handlers;
 mod query;
 
 use crate::{
-    alt,
     compositor::{self, Component, Compositor, Context, Event, EventResult},
-    ctrl, key, shift,
     ui::{
         self,
         document::{render_document, LinePos, TextRenderer},
@@ -60,6 +58,88 @@ pub const ID: &str = "picker";
 pub const MIN_AREA_WIDTH_FOR_PREVIEW: u16 = 72;
 /// Biggest file size to preview in bytes
 pub const MAX_FILE_SIZE_FOR_PREVIEW: u64 = 10 * 1024 * 1024;
+
+/// Picker-specific actions that can be bound to keys
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PickerAction {
+    /// Move to the previous entry in the picker
+    MovePrev,
+    /// Move to the next entry in the picker
+    MoveNext,
+    /// Move one page up in the picker entries
+    PageUp,
+    /// Move one page down in the picker entries
+    PageDown,
+    /// Move to the first entry
+    MoveToStart,
+    /// Move to the last entry
+    MoveToEnd,
+    /// Scroll the preview panel up
+    ScrollPreviewUp,
+    /// Scroll the preview panel down
+    ScrollPreviewDown,
+    /// Toggle preview visibility
+    TogglePreview,
+    /// Close the picker
+    Close,
+    /// Select the current entry with default action
+    Select,
+    /// Select with alternate action
+    SelectAlternate,
+    /// Select and open in horizontal split
+    SelectHorizontalSplit,
+    /// Select and open in vertical split
+    SelectVerticalSplit,
+}
+
+impl std::str::FromStr for PickerAction {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use PickerAction::*;
+        Ok(match s {
+            "move_prev" => MovePrev,
+            "move_next" => MoveNext,
+            "page_up" => PageUp,
+            "page_down" => PageDown,
+            "move_to_start" => MoveToStart,
+            "move_to_end" => MoveToEnd,
+            "scroll_preview_up" => ScrollPreviewUp,
+            "scroll_preview_down" => ScrollPreviewDown,
+            "toggle_preview" => TogglePreview,
+            "close" => Close,
+            "select" => Select,
+            "select_alternate" => SelectAlternate,
+            "select_horizontal_split" => SelectHorizontalSplit,
+            "select_vertical_split" => SelectVerticalSplit,
+            _ => anyhow::bail!("Invalid picker action '{}'", s),
+        })
+    }
+}
+
+impl std::fmt::Display for PickerAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use PickerAction::*;
+        let s = match self {
+            MovePrev => "move_prev",
+            MoveNext => "move_next",
+            PageUp => "page_up",
+            PageDown => "page_down",
+            MoveToStart => "move_to_start",
+            MoveToEnd => "move_to_end",
+            ScrollPreviewUp => "scroll_preview_up",
+            ScrollPreviewDown => "scroll_preview_down",
+            TogglePreview => "toggle_preview",
+            Close => "close",
+            Select => "select",
+            SelectAlternate => "select_alternate",
+            SelectHorizontalSplit => "select_horizontal_split",
+            SelectVerticalSplit => "select_vertical_split",
+        };
+        write!(f, "{}", s)
+    }
+}
 
 #[derive(PartialEq, Eq, Hash)]
 pub enum PathOrId<'a> {
@@ -258,6 +338,8 @@ pub struct Picker<T: 'static + Send + Sync, D: 'static> {
 
     /// Whether to show the preview panel (default true)
     show_preview: bool,
+    /// Scroll offset for the preview panel
+    preview_scroll_offset: ViewPosition,
     /// Constraints for tabular formatting
     widths: Vec<Constraint>,
 
@@ -391,6 +473,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             query,
             truncate_start: true,
             show_preview: true,
+            preview_scroll_offset: ViewPosition::default(),
             callback_fn: Box::new(callback_fn),
             default_action: Action::Replace,
             completion_height: 0,
@@ -481,6 +564,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             return;
         }
 
+        let old_cursor = self.cursor;
         match direction {
             Direction::Forward => {
                 self.cursor = self.cursor.saturating_add(amount) % len;
@@ -488,6 +572,11 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             Direction::Backward => {
                 self.cursor = self.cursor.saturating_add(len).saturating_sub(amount) % len;
             }
+        }
+
+        // Reset preview scroll when moving to a different entry
+        if old_cursor != self.cursor {
+            self.reset_preview_scroll();
         }
     }
 
@@ -504,6 +593,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
     /// Move the cursor to the first entry
     pub fn to_start(&mut self) {
         self.cursor = 0;
+        self.reset_preview_scroll();
     }
 
     /// Move the cursor to the last entry
@@ -513,6 +603,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             .snapshot()
             .matched_item_count()
             .saturating_sub(1);
+        self.reset_preview_scroll();
     }
 
     pub fn selection(&self) -> Option<&T> {
@@ -556,6 +647,23 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
 
     pub fn toggle_preview(&mut self) {
         self.show_preview = !self.show_preview;
+    }
+
+    /// Scroll the preview panel up by the given number of lines
+    pub fn scroll_preview_up(&mut self, scroll_lines: usize) {
+        self.preview_scroll_offset.vertical_offset =
+            self.preview_scroll_offset.vertical_offset.saturating_sub(scroll_lines);
+    }
+
+    /// Scroll the preview panel down by the given number of lines
+    pub fn scroll_preview_down(&mut self, scroll_lines: usize) {
+        self.preview_scroll_offset.vertical_offset =
+            self.preview_scroll_offset.vertical_offset.saturating_add(scroll_lines);
+    }
+
+    /// Reset the preview scroll offset (useful when changing selections)
+    pub fn reset_preview_scroll(&mut self) {
+        self.preview_scroll_offset = ViewPosition::default();
     }
 
     fn prompt_handle_event(&mut self, event: &Event, cx: &mut Context) -> EventResult {
@@ -931,6 +1039,9 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         let inner = inner.inner(margin);
         BLOCK.render(area, surface);
 
+        // Copy scroll offset before borrowing self
+        let user_scroll_offset = self.preview_scroll_offset;
+
         if let Some((preview, range)) = self.get_preview(cx.editor) {
             let doc = match preview.document() {
                 Some(doc)
@@ -991,6 +1102,10 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
                     offset.anchor = start;
                 }
             }
+
+            // Apply user's scroll offset to the calculated offset
+            offset.vertical_offset = offset.vertical_offset.saturating_add(user_scroll_offset.vertical_offset);
+            offset.horizontal_offset = offset.horizontal_offset.saturating_add(user_scroll_offset.horizontal_offset);
 
             let loader = cx.editor.syn_loader.load();
 
@@ -1070,7 +1185,46 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
     }
 
     fn handle_event(&mut self, event: &Event, ctx: &mut Context) -> EventResult {
-        // TODO: keybinds for scrolling preview
+        // Handle mouse events for preview scrolling if enabled
+        if let Event::Mouse(mouse_event) = event {
+            if ctx.editor.config().picker_preview_scroll && ctx.editor.config().mouse {
+                use helix_view::input::MouseEventKind;
+
+                // Calculate the preview area to check if mouse is within it
+                let area = ctx.editor.tree.area();
+                let render_preview =
+                    self.show_preview && self.file_fn.is_some() && area.width > MIN_AREA_WIDTH_FOR_PREVIEW;
+
+                if render_preview {
+                    let picker_width = area.width / 2;
+                    let preview_area = area.clip_left(picker_width);
+
+                    // Check if mouse is within preview area
+                    let mouse_is_within_preview = mouse_event.column >= preview_area.left()
+                        && mouse_event.column < preview_area.right()
+                        && mouse_event.row >= preview_area.top()
+                        && mouse_event.row < preview_area.bottom();
+
+                    if mouse_is_within_preview {
+                        // Handle scroll events
+                        match mouse_event.kind {
+                            MouseEventKind::ScrollDown => {
+                                let scroll_lines = ctx.editor.config().scroll_lines.unsigned_abs();
+                                self.scroll_preview_down(scroll_lines);
+                                return EventResult::Consumed(None);
+                            }
+                            MouseEventKind::ScrollUp => {
+                                let scroll_lines = ctx.editor.config().scroll_lines.unsigned_abs();
+                                self.scroll_preview_up(scroll_lines);
+                                return EventResult::Consumed(None);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            return EventResult::Ignored(None);
+        }
 
         let key_event = match event {
             Event::Key(event) => *event,
@@ -1078,6 +1232,9 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
             Event::Resize(..) => return EventResult::Consumed(None),
             _ => return EventResult::Ignored(None),
         };
+
+        // Look up action from keymap
+        let action = ctx.picker_keymap.get(&key_event);
 
         let close_fn = |picker: &mut Self| {
             // if the picker is very large don't store it as last_picker to avoid
@@ -1102,47 +1259,62 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
             EventResult::Consumed(Some(callback))
         };
 
-        match key_event {
-            shift!(Tab) | key!(Up) | ctrl!('p') => {
-                self.move_by(1, Direction::Backward);
-            }
-            key!(Tab) | key!(Down) | ctrl!('n') => {
-                self.move_by(1, Direction::Forward);
-            }
-            key!(PageDown) | ctrl!('d') => {
-                self.page_down();
-            }
-            key!(PageUp) | ctrl!('u') => {
-                self.page_up();
-            }
-            key!(Home) => {
-                self.to_start();
-            }
-            key!(End) => {
-                self.to_end();
-            }
-            key!(Esc) | ctrl!('c') => return close_fn(self),
-            alt!(Enter) => {
-                if let Some(option) = self.selection() {
-                    (self.callback_fn)(ctx, option, self.default_action);
+        // Execute action based on keymap lookup
+        if let Some(&action) = action {
+            use PickerAction::*;
+            match action {
+                MovePrev => {
+                    self.move_by(1, Direction::Backward);
                 }
-            }
-            key!(Enter) => {
-                // If the prompt has a history completion and is empty, use enter to accept
-                // that completion
-                if let Some(completion) = self
-                    .prompt
-                    .first_history_completion(ctx.editor)
-                    .filter(|_| self.prompt.line().is_empty())
-                {
-                    // The percent character is used by the query language and needs to be
-                    // escaped with a backslash.
-                    let completion = if completion.contains('%') {
-                        completion.replace('%', "\\%")
-                    } else {
-                        completion.into_owned()
-                    };
-                    self.prompt.set_line(completion, ctx.editor);
+                MoveNext => {
+                    self.move_by(1, Direction::Forward);
+                }
+                PageUp => {
+                    self.page_up();
+                }
+                PageDown => {
+                    self.page_down();
+                }
+                MoveToStart => {
+                    self.to_start();
+                }
+                MoveToEnd => {
+                    self.to_end();
+                }
+                ScrollPreviewUp => {
+                    if ctx.editor.config().picker_preview_scroll {
+                        let scroll_lines = ctx.editor.config().scroll_lines.unsigned_abs();
+                        self.scroll_preview_up(scroll_lines);
+                    }
+                }
+                ScrollPreviewDown => {
+                    if ctx.editor.config().picker_preview_scroll {
+                        let scroll_lines = ctx.editor.config().scroll_lines.unsigned_abs();
+                        self.scroll_preview_down(scroll_lines);
+                    }
+                }
+                TogglePreview => {
+                    self.toggle_preview();
+                }
+                Close => {
+                    return close_fn(self);
+                }
+                Select => {
+                    // If the prompt has a history completion and is empty, use enter to accept
+                    // that completion
+                    if let Some(completion) = self
+                        .prompt
+                        .first_history_completion(ctx.editor)
+                        .filter(|_| self.prompt.line().is_empty())
+                    {
+                        // The percent character is used by the query language and needs to be
+                        // escaped with a backslash.
+                        let completion = if completion.contains('%') {
+                            completion.replace('%', "\\%")
+                        } else {
+                            completion.into_owned()
+                        };
+                        self.prompt.set_line(completion, ctx.editor);
 
                     // Inserting from the history register is a paste.
                     self.handle_prompt_change(true);
@@ -1211,8 +1383,6 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
                 self.prompt_handle_event(event, ctx);
             }
         }
-
-        EventResult::Consumed(None)
     }
 
     fn cursor(&self, area: Rect, editor: &Editor) -> (Option<Position>, CursorKind) {

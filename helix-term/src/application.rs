@@ -126,8 +126,9 @@ impl Application {
         let theme_mode = backend.get_theme_mode();
         let terminal = Terminal::new(backend)?;
         let area = terminal.size();
-        let mut compositor = Compositor::new(area);
         let config = Arc::new(ArcSwap::from_pointee(config));
+        let picker_keys = config.load().picker_keys.clone();
+        let mut compositor = Compositor::new(area, picker_keys.clone());
         let handlers = handlers::setup(config.clone());
         let mut editor = Editor::new(
             area,
@@ -148,7 +149,7 @@ impl Application {
         let keys = Box::new(Map::new(Arc::clone(&config), |config: &Config| {
             &config.keys
         }));
-        let editor_view = Box::new(ui::EditorView::new(Keymaps::new(keys)));
+        let editor_view = Box::new(ui::EditorView::new(Keymaps::new(keys, picker_keys)));
         compositor.push(editor_view);
 
         let jobs = Jobs::new();
@@ -276,10 +277,12 @@ impl Application {
             self.compositor.full_redraw = false;
         }
 
+        let picker_keymap = self.compositor.picker_keymap();
         let mut cx = crate::compositor::Context {
             editor: &mut self.editor,
             jobs: &mut self.jobs,
             scroll: None,
+            picker_keymap: &picker_keymap,
         };
 
         helix_event::start_frame();
@@ -565,10 +568,12 @@ impl Application {
     }
 
     pub async fn handle_idle_timeout(&mut self) {
+        let picker_keymap = self.compositor.picker_keymap();
         let mut cx = crate::compositor::Context {
             editor: &mut self.editor,
             jobs: &mut self.jobs,
             scroll: None,
+            picker_keymap: &picker_keymap,
         };
         let should_render = self.compositor.handle_event(&Event::IdleTimeout, &mut cx);
         if should_render || self.editor.needs_redraw {
@@ -689,10 +694,12 @@ impl Application {
         #[cfg(not(windows))]
         use termina::escape::csi;
 
+        let picker_keymap = self.compositor.picker_keymap();
         let mut cx = crate::compositor::Context {
             editor: &mut self.editor,
             jobs: &mut self.jobs,
             scroll: None,
+            picker_keymap: &picker_keymap,
         };
         // Handle key events
         let should_redraw = match event.unwrap() {

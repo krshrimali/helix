@@ -81,10 +81,13 @@ impl helix_event::AsyncHook for AutoSaveHandler {
 }
 
 fn request_auto_save(editor: &mut Editor) {
+    use std::collections::HashMap;
+    let empty_picker_keymap = HashMap::new();
     let context = &mut compositor::Context {
         editor,
         scroll: Some(0),
         jobs: &mut Jobs::new(),
+        picker_keymap: &empty_picker_keymap,
     };
 
     let options = commands::WriteAllOptions {
