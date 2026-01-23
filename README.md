@@ -18,24 +18,79 @@
 
 ## Custom Features Added
 
-| Feature | Description | Keyboard Shortcuts | Mouse Support | Configuration |
-|---------|-------------|-------------------|---------------|---------------|
-| **Picker Preview Scrolling** | Scroll through file previews in pickers without changing selection | `Alt+Up`/`Alt+Down` or `Ctrl+y`/`Ctrl+e` | Scroll wheel over preview panel | `picker-preview-scroll = true` (default) |
-| **Customizable Picker Keybindings** | Fully customizable keybindings for all picker actions | See picker keybindings section below | N/A | Configure via `[picker-keys]` in config.toml |
+### Feature Summary
+
+| Feature | Description | Default Keybindings | Configuration |
+|---------|-------------|---------------------|---------------|
+| **Picker Preview Scrolling** | Scroll file previews in pickers | `Alt+Up`/`Alt+Down`, `Ctrl+y`/`Ctrl+e`, or mouse scroll | `picker_preview_scroll = true` |
+| **Quickfix List** | Vim-like quickfix for navigating locations | `Space x x` (open), `]q`/`[q` (next/prev) | N/A |
+| **Send to Quickfix** | Send picker results to quickfix list | `Alt+q` in any picker | `[picker_keys]` section |
+| **Hover Documentation Split** | Open docs in a split instead of popup | `Space h s` (hsplit), `Space h v` (vsplit) | N/A |
+| **Symbol Tree** | LSP symbol outline in a side panel | `Space l o` (vsplit), `Space l O` (hsplit) | N/A |
+| **Breadcrumbs** | Show symbol hierarchy at cursor | `Space l b` | N/A |
+| **Customizable Picker Keys** | Fully customizable picker keybindings | See table below | `[picker_keys]` section |
+
+---
+
+### Quickfix List
+
+A vim-like quickfix list for storing and navigating file locations (e.g., search results, diagnostics).
+
+| Keybinding | Action | Description |
+|------------|--------|-------------|
+| `Space x x` | `quickfix_picker` | Open quickfix list picker |
+| `Space x s` | `quickfix_picker_hsplit` | Open quickfix in horizontal split |
+| `Space x v` | `quickfix_picker_vsplit` | Open quickfix in vertical split |
+| `]q` | `quickfix_next` | Jump to next quickfix item |
+| `[q` | `quickfix_prev` | Jump to previous quickfix item |
+| `]Q` | `quickfix_last` | Jump to last quickfix item |
+| `[Q` | `quickfix_first` | Jump to first quickfix item |
+| `Space x c` | `quickfix_clear` | Clear quickfix list |
+| `Space x .` | `quickfix_first` | Jump to first item |
+| `Space x ,` | `quickfix_last` | Jump to last item |
+| `Enter` | `quickfix_jump_to_location` | Jump to location (in quickfix buffer) |
+
+**Sending to Quickfix:** In any picker, press `Alt+q` to send all filtered results to the quickfix list.
+
+---
+
+### Hover Documentation Split
+
+Open LSP hover documentation in a split window instead of a popup.
+
+| Keybinding | Action | Description |
+|------------|--------|-------------|
+| `Space h s` | `hover_hsplit` | Open documentation in horizontal split |
+| `Space h v` | `hover_vsplit` | Open documentation in vertical split |
+| `Space h h` | `select_references_to_symbol_under_cursor` | Select all references to symbol |
+
+---
+
+### Symbol Tree & Breadcrumbs
+
+Navigate code structure using LSP document symbols.
+
+| Keybinding | Action | Description |
+|------------|--------|-------------|
+| `Space l o` | `symbol_tree` | Open symbol tree in vertical split |
+| `Space l O` | `symbol_tree_hsplit` | Open symbol tree in horizontal split |
+| `Space l B` | `breadcrumbs` | Show breadcrumbs (symbol hierarchy) picker |
+
+---
 
 ### Picker Keybindings
 
-The picker now supports fully customizable keybindings! You can customize any picker action in your `config.toml`:
+Customize picker keybindings in your `config.toml`:
 
 ```toml
-[picker-keys]
+[picker_keys]
 # Navigation
 up = "move_prev"
 down = "move_next"
-"C-n" = "move_next"
 "C-p" = "move_prev"
-"C-d" = "page_down"
+"C-n" = "move_next"
 "C-u" = "page_up"
+"C-d" = "page_down"
 home = "move_to_start"
 end = "move_to_end"
 
@@ -53,6 +108,7 @@ ret = "select"
 "A-ret" = "select_alternate"
 "C-s" = "select_horizontal_split"
 "C-v" = "select_vertical_split"
+"A-q" = "send_to_quickfix"
 ```
 
 #### Available Picker Actions
@@ -73,6 +129,19 @@ ret = "select"
 | `select_alternate` | Select with alternate action |
 | `select_horizontal_split` | Open in horizontal split |
 | `select_vertical_split` | Open in vertical split |
+| `send_to_quickfix` | Send filtered items to quickfix list |
+
+---
+
+### Editor Configuration
+
+Add to `[editor]` section in `config.toml`:
+
+```toml
+[editor]
+# Enable mouse scrolling in picker preview panels (default: true)
+picker_preview_scroll = true
+```
 
 ![Screenshot](./screenshot.png)
 
