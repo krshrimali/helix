@@ -6793,8 +6793,8 @@ fn suspend(_cx: &mut Context) {
 }
 
 fn lazygit(cx: &mut Context) {
-    cx.editor
-        .request_external_tui("lazygit".to_string(), vec![]);
+    let lazygit_cmd = cx.editor.config().lazygit.clone();
+    cx.editor.request_external_tui(lazygit_cmd, vec![]);
 }
 
 fn add_newline_above(cx: &mut Context) {

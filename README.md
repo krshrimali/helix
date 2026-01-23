@@ -28,6 +28,7 @@
 | **Hover Documentation Split** | Open docs in a split instead of popup | `Space h s` (hsplit), `Space h v` (vsplit) | N/A |
 | **Symbol Tree** | LSP symbol outline in a side panel | `Space l o` (vsplit), `Space l O` (hsplit) | N/A |
 | **Breadcrumbs** | Show symbol hierarchy at cursor | `Space l b` | N/A |
+| **Lazygit Integration** | Open lazygit with full terminal control | `Space l g` | `lazygit = "lazygit"` |
 | **Customizable Picker Keys** | Fully customizable picker keybindings | See table below | `[picker_keys]` section |
 
 ---
@@ -130,6 +131,27 @@ ret = "select"
 | `select_horizontal_split` | Open in horizontal split |
 | `select_vertical_split` | Open in vertical split |
 | `send_to_quickfix` | Send filtered items to quickfix list |
+
+---
+
+### Lazygit Integration
+
+Open lazygit directly from helix with full terminal control. All lazygit keybindings work natively.
+
+| Keybinding | Action | Description |
+|------------|--------|-------------|
+| `Space l g` | `lazygit` | Open lazygit |
+
+**Configuration:**
+
+```toml
+[editor]
+# Command to use for lazygit (default: "lazygit")
+# Can be a full path or alternate command
+lazygit = "lazygit"
+```
+
+When lazygit opens, helix gives up terminal control completely. All lazygit keybindings work as expected. When you exit lazygit (`q`), helix reclaims the terminal and restores its display.
 
 ---
 

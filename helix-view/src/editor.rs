@@ -303,6 +303,9 @@ pub struct Config {
     pub mouse: bool,
     /// Shell to use for shell commands. Defaults to ["cmd", "/C"] on Windows and ["sh", "-c"] otherwise.
     pub shell: Vec<String>,
+    /// Command to use for lazygit integration. Defaults to "lazygit".
+    /// Can be set to a full path or alternate command.
+    pub lazygit: String,
     /// Line number mode.
     pub line_number: LineNumber,
     /// Highlight the lines cursors are currently on. Defaults to false.
@@ -1097,6 +1100,7 @@ impl Default for Config {
             } else {
                 vec!["sh".to_owned(), "-c".to_owned()]
             },
+            lazygit: "lazygit".to_owned(),
             line_number: LineNumber::Absolute,
             cursorline: false,
             cursorcolumn: false,
