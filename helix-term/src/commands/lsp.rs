@@ -475,6 +475,382 @@ pub fn symbol_picker(cx: &mut Context) {
     });
 }
 
+/// Open symbol tree view in vertical split (right side)
+pub fn symbol_tree(cx: &mut Context) {
+    symbol_tree_impl(cx, true);
+}
+
+/// Open symbol tree view in horizontal split (bottom)
+pub fn symbol_tree_hsplit(cx: &mut Context) {
+    symbol_tree_impl(cx, false);
+}
+
+/// The type of breadcrumb item
+#[derive(Clone)]
+enum BreadcrumbKind {
+    /// A directory in the file path
+    Directory(std::path::PathBuf),
+    /// The current file
+    File(std::path::PathBuf),
+    /// An LSP symbol
+    Symbol(lsp::SymbolKind),
+}
+
+/// A breadcrumb item for the picker
+struct BreadcrumbItem {
+    name: String,
+    kind: BreadcrumbKind,
+    /// Location for symbols, None for directories
+    location: Option<Location>,
+    depth: usize,
+}
+
+/// Open breadcrumbs picker showing the parent path from current cursor position
+pub fn breadcrumbs(cx: &mut Context) {
+    let (view, doc) = current!(cx.editor);
+
+    // Get current cursor line
+    let cursor_pos = doc.selection(view.id).primary().cursor(doc.text().slice(..));
+    let cursor_line = doc.text().char_to_line(cursor_pos) as u32;
+
+    // Get the file path for directory breadcrumbs
+    let file_path = doc.path().cloned();
+
+    let mut seen_language_servers = HashSet::new();
+
+    let mut futures: FuturesOrdered<_> = doc
+        .language_servers_with_feature(LanguageServerFeature::DocumentSymbols)
+        .filter(|ls| seen_language_servers.insert(ls.id()))
+        .map(|language_server| {
+            let request = language_server.document_symbols(doc.identifier()).unwrap();
+            let offset_encoding = language_server.offset_encoding();
+            let doc_uri = doc
+                .uri()
+                .expect("docs with active language servers must be backed by paths");
+
+            async move {
+                let symbols = match request.await? {
+                    Some(symbols) => symbols,
+                    None => return anyhow::Ok(None),
+                };
+                Ok(Some((symbols, doc_uri, offset_encoding)))
+            }
+        })
+        .collect();
+
+    if futures.is_empty() {
+        cx.editor
+            .set_error("No configured language server supports document symbols");
+        return;
+    }
+
+    cx.jobs.callback(async move {
+        let mut result = None;
+        while let Some(response) = futures.next().await {
+            match response {
+                Ok(Some((symbols, uri, offset_encoding))) => {
+                    result = Some((symbols, uri, offset_encoding));
+                    break;
+                }
+                Ok(None) => {}
+                Err(err) => log::error!("Error requesting document symbols: {err}"),
+            }
+        }
+
+        let Some((symbols, uri, offset_encoding)) = result else {
+            return Ok(Callback::EditorCompositor(Box::new(|editor: &mut Editor, _| {
+                editor.set_error("No symbols found in document");
+            })));
+        };
+
+        let call = move |editor: &mut Editor, compositor: &mut Compositor| {
+            let mut breadcrumbs = Vec::new();
+
+            // Add directory breadcrumbs first (from workspace root or cwd)
+            if let Some(ref path) = file_path {
+                let cwd = helix_stdx::env::current_working_dir();
+                let relative_path = path.strip_prefix(&cwd).unwrap_or(path);
+
+                // Add parent directories
+                let mut ancestors: Vec<_> = relative_path.ancestors().collect();
+                ancestors.pop(); // Remove the empty "" at the end
+                ancestors.reverse(); // Start from root
+
+                for (depth, ancestor) in ancestors.iter().enumerate() {
+                    if ancestor.as_os_str().is_empty() {
+                        continue;
+                    }
+
+                    let name = if *ancestor == relative_path {
+                        // This is the file itself
+                        ancestor
+                            .file_name()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_else(|| ancestor.to_string_lossy().to_string())
+                    } else {
+                        // This is a directory
+                        ancestor
+                            .file_name()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_else(|| ancestor.to_string_lossy().to_string())
+                    };
+
+                    let full_path = cwd.join(ancestor);
+                    let is_file = *ancestor == relative_path;
+
+                    breadcrumbs.push(BreadcrumbItem {
+                        name,
+                        kind: if is_file {
+                            BreadcrumbKind::File(full_path)
+                        } else {
+                            BreadcrumbKind::Directory(full_path)
+                        },
+                        location: None,
+                        depth,
+                    });
+                }
+            }
+
+            // Calculate symbol depth offset (after file path items)
+            let symbol_depth_offset = breadcrumbs.len();
+
+            // Add symbol breadcrumbs
+            let symbol_breadcrumbs =
+                find_breadcrumb_path(&symbols, &uri, offset_encoding, cursor_line, symbol_depth_offset);
+            breadcrumbs.extend(symbol_breadcrumbs);
+
+            if breadcrumbs.is_empty() {
+                editor.set_error("No breadcrumbs found");
+                return;
+            }
+
+            // Start cursor at the last (deepest/current) item
+            let initial_cursor = breadcrumbs.len().saturating_sub(1) as u32;
+
+            // Create picker with breadcrumbs
+            let columns = [
+                ui::PickerColumn::new("kind", |item: &BreadcrumbItem, _| {
+                    match &item.kind {
+                        BreadcrumbKind::Directory(_) => "dir".into(),
+                        BreadcrumbKind::File(_) => "file".into(),
+                        BreadcrumbKind::Symbol(kind) => display_symbol_kind(*kind).into(),
+                    }
+                }),
+                ui::PickerColumn::new("name", |item: &BreadcrumbItem, _| {
+                    // Add indentation based on depth for visual hierarchy
+                    let indent = "  ".repeat(item.depth);
+                    format!("{}{}", indent, item.name).into()
+                }),
+            ];
+
+            let picker = Picker::new(
+                columns,
+                1, // name column
+                breadcrumbs,
+                (),
+                move |cx, item: &BreadcrumbItem, action| {
+                    match &item.kind {
+                        BreadcrumbKind::Directory(path) => {
+                            // Open file picker at this directory
+                            let path = path.clone();
+                            cx.jobs.callback(async move {
+                                let call: Callback = Callback::EditorCompositor(Box::new(
+                                    move |editor, compositor| {
+                                        let picker = ui::file_picker(editor, path);
+                                        compositor.push(Box::new(ui::overlay::overlaid(picker)));
+                                    },
+                                ));
+                                Ok(call)
+                            });
+                        }
+                        BreadcrumbKind::File(path) => {
+                            // Open the file
+                            if let Err(e) = cx.editor.open(path, action) {
+                                cx.editor.set_error(format!("Failed to open file: {}", e));
+                            }
+                        }
+                        BreadcrumbKind::Symbol(_) => {
+                            // Jump to symbol location
+                            if let Some(ref location) = item.location {
+                                jump_to_location(cx.editor, location, action);
+                            }
+                        }
+                    }
+                },
+            )
+            .with_preview(move |_editor, item| {
+                match &item.kind {
+                    BreadcrumbKind::Directory(_) => None,
+                    BreadcrumbKind::File(path) => Some((path.as_path().into(), None)),
+                    BreadcrumbKind::Symbol(_) => {
+                        item.location.as_ref().and_then(|loc| location_to_file_location(loc))
+                    }
+                }
+            })
+            .with_initial_cursor(initial_cursor)
+            .truncate_start(false);
+
+            compositor.push(Box::new(overlaid(picker)));
+        };
+
+        Ok(Callback::EditorCompositor(Box::new(call)))
+    });
+}
+
+/// Find the breadcrumb path from root to the symbol containing the cursor
+fn find_breadcrumb_path(
+    symbols: &lsp::DocumentSymbolResponse,
+    uri: &Uri,
+    offset_encoding: OffsetEncoding,
+    cursor_line: u32,
+    depth_offset: usize,
+) -> Vec<BreadcrumbItem> {
+    match symbols {
+        lsp::DocumentSymbolResponse::Nested(symbols) => {
+            let mut path = Vec::new();
+            find_path_recursive(symbols, uri, offset_encoding, cursor_line, depth_offset, &mut path);
+            path
+        }
+        lsp::DocumentSymbolResponse::Flat(symbols) => {
+            // For flat symbols, find the one containing the cursor
+            symbols
+                .iter()
+                .filter(|s| {
+                    let start = s.location.range.start.line;
+                    let end = s.location.range.end.line;
+                    cursor_line >= start && cursor_line <= end
+                })
+                .map(|s| BreadcrumbItem {
+                    name: s.name.clone(),
+                    kind: BreadcrumbKind::Symbol(s.kind),
+                    location: Some(Location {
+                        uri: uri.clone(),
+                        range: s.location.range,
+                        offset_encoding,
+                    }),
+                    depth: depth_offset,
+                })
+                .collect()
+        }
+    }
+}
+
+/// Recursively find the path to the deepest symbol containing cursor_line
+fn find_path_recursive(
+    symbols: &[lsp::DocumentSymbol],
+    uri: &Uri,
+    offset_encoding: OffsetEncoding,
+    cursor_line: u32,
+    depth: usize,
+    path: &mut Vec<BreadcrumbItem>,
+) -> bool {
+    for symbol in symbols {
+        let start = symbol.range.start.line;
+        let end = symbol.range.end.line;
+
+        if cursor_line >= start && cursor_line <= end {
+            // This symbol contains the cursor
+            path.push(BreadcrumbItem {
+                name: symbol.name.clone(),
+                kind: BreadcrumbKind::Symbol(symbol.kind),
+                location: Some(Location {
+                    uri: uri.clone(),
+                    range: symbol.selection_range,
+                    offset_encoding,
+                }),
+                depth,
+            });
+
+            // Check children for a more specific match
+            if let Some(children) = &symbol.children {
+                find_path_recursive(children, uri, offset_encoding, cursor_line, depth + 1, path);
+            }
+
+            return true;
+        }
+    }
+    false
+}
+
+fn symbol_tree_impl(cx: &mut Context, render_right: bool) {
+    let (view, doc) = current!(cx.editor);
+    let doc_id = doc.id();
+
+    // Get current cursor line (0-indexed, convert to LSP line number)
+    let cursor_pos = doc.selection(view.id).primary().cursor(doc.text().slice(..));
+    let cursor_line = doc.text().char_to_line(cursor_pos) as u32;
+
+    let mut seen_language_servers = HashSet::new();
+
+    let mut futures: FuturesOrdered<_> = doc
+        .language_servers_with_feature(LanguageServerFeature::DocumentSymbols)
+        .filter(|ls| seen_language_servers.insert(ls.id()))
+        .map(|language_server| {
+            let request = language_server.document_symbols(doc.identifier()).unwrap();
+            let offset_encoding = language_server.offset_encoding();
+            let doc_uri = doc
+                .uri()
+                .expect("docs with active language servers must be backed by paths");
+
+            async move {
+                let symbols = match request.await? {
+                    Some(symbols) => symbols,
+                    None => return anyhow::Ok(None),
+                };
+                Ok(Some((symbols, doc_uri, offset_encoding)))
+            }
+        })
+        .collect();
+
+    if futures.is_empty() {
+        cx.editor
+            .set_error("No configured language server supports document symbols");
+        return;
+    }
+
+    cx.jobs.callback(async move {
+        let mut result = None;
+        while let Some(response) = futures.next().await {
+            match response {
+                Ok(Some((symbols, uri, offset_encoding))) => {
+                    // Use the first successful response
+                    result = Some((symbols, uri, offset_encoding));
+                    break;
+                }
+                Ok(None) => {}
+                Err(err) => log::error!("Error requesting document symbols: {err}"),
+            }
+        }
+
+        let Some((symbols, uri, offset_encoding)) = result else {
+            return Ok(Callback::EditorCompositor(Box::new(|editor: &mut Editor, _| {
+                editor.set_error("No symbols found in document");
+            })));
+        };
+
+        let call = move |editor: &mut Editor, compositor: &mut Compositor| {
+            // Build the symbol tree
+            let roots = ui::build_symbol_tree(symbols, uri, offset_encoding);
+
+            if roots.is_empty() {
+                editor.set_error("No symbols found in document");
+                return;
+            }
+
+            // Create symbol tree view focused on current cursor position
+            let tree_view = ui::SymbolTreeView::new_at_position(
+                roots,
+                doc_id,
+                render_right,
+                Some(cursor_line),
+            );
+            compositor.push(Box::new(tree_view));
+        };
+
+        Ok(Callback::EditorCompositor(Box::new(call)))
+    });
+}
+
 pub fn workspace_symbol_picker(cx: &mut Context) {
     use crate::ui::picker::Injector;
 

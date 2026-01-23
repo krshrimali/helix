@@ -254,6 +254,9 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
                 "c" => quickfix_clear,
                 "ret" => quickfix_jump_to_location,
             },
+            "o" => symbol_tree,
+            "O" => symbol_tree_hsplit,
+            "B" => breadcrumbs,
             "G" => { "Debug (experimental)" sticky=true
                 "l" => dap_launch,
                 "r" => dap_restart,

@@ -11,6 +11,7 @@ pub mod popup;
 pub mod prompt;
 mod spinner;
 mod statusline;
+pub mod symbol_tree;
 mod text;
 mod text_decorations;
 
@@ -27,6 +28,7 @@ pub use picker::{Column as PickerColumn, FileLocation, Picker};
 pub use popup::Popup;
 pub use prompt::{Prompt, PromptEvent};
 pub use spinner::{ProgressSpinners, Spinner};
+pub use symbol_tree::{build_symbol_tree, SymbolTreeNode, SymbolTreeView};
 pub use text::Text;
 
 use helix_core::Uri;
