@@ -626,6 +626,7 @@ impl MappableCommand {
         shell_append_output, "Append shell command output after selections",
         shell_keep_pipe, "Filter selections with shell predicate",
         suspend, "Suspend and return to shell",
+        lazygit, "Open lazygit",
         rename_symbol, "Rename symbol",
         increment, "Increment item under cursor",
         decrement, "Decrement item under cursor",
@@ -6789,6 +6790,11 @@ fn suspend(_cx: &mut Context) {
         _cx.block_try_flush_writes().ok();
         signal_hook::low_level::raise(signal_hook::consts::signal::SIGTSTP).unwrap();
     }
+}
+
+fn lazygit(cx: &mut Context) {
+    cx.editor
+        .request_external_tui("lazygit".to_string(), vec![]);
 }
 
 fn add_newline_above(cx: &mut Context) {

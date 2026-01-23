@@ -243,6 +243,9 @@ pub fn default() -> (HashMap<Mode, KeyTrie>, PickerKeymap) {
             "D" => workspace_diagnostics_picker,
             "g" => changed_file_picker,
             "a" => code_action,
+            "l" => { "Lazygit"
+                "g" => lazygit,
+            },
             "'" => last_picker,
             "x" => { "Quickfix"
                 "x" => quickfix_picker,

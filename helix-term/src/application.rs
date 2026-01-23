@@ -567,6 +567,72 @@ impl Application {
         true
     }
 
+    /// Run an external TUI application, giving it full terminal control.
+    /// Used for integrations like lazygit.
+    #[cfg(not(windows))]
+    async fn run_external_tui(&mut self, program: &str, args: &[String]) {
+        use std::process::Stdio;
+
+        // Check if program exists
+        if std::process::Command::new(program)
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_err()
+        {
+            self.editor
+                .set_error(format!("{} is not installed or not in PATH", program));
+            return;
+        }
+
+        // Flush writes before releasing terminal
+        if let Err(e) = self.editor.flush_writes().await {
+            log::warn!("Error flushing writes before external TUI: {}", e);
+        }
+
+        // Restore terminal (give up control)
+        if let Err(e) = self.restore_term() {
+            self.editor
+                .set_error(format!("Failed to restore terminal: {}", e));
+            return;
+        }
+
+        // Run the external program (blocking)
+        let status = std::process::Command::new(program).args(args).status();
+
+        // Reclaim terminal (with retries like SIGCONT handler)
+        for retries in 1..=10 {
+            match self.terminal.claim() {
+                Ok(()) => break,
+                Err(err) if retries == 10 => {
+                    panic!("Failed to claim terminal after {}: {}", program, err);
+                }
+                Err(_) => continue,
+            }
+        }
+
+        // Redraw
+        let area = self.terminal.size();
+        self.compositor.resize(area);
+        self.terminal.clear().expect("couldn't clear terminal");
+        self.render().await;
+
+        // Report any errors
+        if let Err(e) = status {
+            self.editor
+                .set_error(format!("Failed to run {}: {}", program, e));
+        }
+    }
+
+    #[cfg(windows)]
+    async fn run_external_tui(&mut self, program: &str, _args: &[String]) {
+        self.editor.set_error(format!(
+            "External TUI integration ({}) is not supported on Windows",
+            program
+        ));
+    }
+
     pub async fn handle_idle_timeout(&mut self) {
         let picker_keymap = self.compositor.picker_keymap();
         let mut cx = crate::compositor::Context {
@@ -672,6 +738,9 @@ impl Application {
                 if needs_render {
                     self.render().await;
                 }
+            }
+            EditorEvent::ExternalTui(request) => {
+                self.run_external_tui(&request.program, &request.args).await;
             }
             EditorEvent::Redraw => {
                 self.render().await;

@@ -1236,6 +1236,7 @@ pub struct Editor {
     pub exit_code: i32,
 
     pub config_events: (UnboundedSender<ConfigEvent>, UnboundedReceiver<ConfigEvent>),
+    pub external_tui_requests: (UnboundedSender<ExternalTuiRequest>, UnboundedReceiver<ExternalTuiRequest>),
     pub needs_redraw: bool,
     /// Cached position of the cursor calculated during rendering.
     /// The content of `cursor_cache` is returned by `Editor::cursor` if
@@ -1266,6 +1267,7 @@ pub enum EditorEvent {
     ConfigEvent(ConfigEvent),
     LanguageServerMessage((LanguageServerId, Call)),
     DebuggerEvent((DebugAdapterId, dap::Payload)),
+    ExternalTui(ExternalTuiRequest),
     IdleTimer,
     Redraw,
 }
@@ -1274,6 +1276,13 @@ pub enum EditorEvent {
 pub enum ConfigEvent {
     Refresh,
     Update(Box<Config>),
+}
+
+/// Request to run an external TUI application (e.g., lazygit)
+#[derive(Debug)]
+pub struct ExternalTuiRequest {
+    pub program: String,
+    pub args: Vec<String>,
 }
 
 enum ThemeAction {
@@ -1373,6 +1382,7 @@ impl Editor {
             auto_pairs,
             exit_code: 0,
             config_events: unbounded_channel(),
+            external_tui_requests: unbounded_channel(),
             needs_redraw: false,
             handlers,
             mouse_down_range: None,
@@ -1389,6 +1399,12 @@ impl Editor {
     pub fn menu_border(&self) -> bool {
         self.config().popup_border == PopupBorderConfig::All
             || self.config().popup_border == PopupBorderConfig::Menu
+    }
+
+    /// Request to run an external TUI application (e.g., lazygit).
+    /// The application event loop will handle restoring/claiming the terminal.
+    pub fn request_external_tui(&self, program: String, args: Vec<String>) {
+        let _ = self.external_tui_requests.0.send(ExternalTuiRequest { program, args });
     }
 
     pub fn apply_motion<F: Fn(&mut Self) + 'static>(&mut self, motion: F) {
@@ -2340,6 +2356,9 @@ impl Editor {
                 }
                 Some(config_event) = self.config_events.1.recv() => {
                     return EditorEvent::ConfigEvent(config_event)
+                }
+                Some(request) = self.external_tui_requests.1.recv() => {
+                    return EditorEvent::ExternalTui(request)
                 }
                 Some(message) = self.language_servers.incoming.next() => {
                     return EditorEvent::LanguageServerMessage(message)
