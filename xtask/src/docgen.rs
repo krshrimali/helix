@@ -56,7 +56,7 @@ pub fn typable_commands() -> Result<String, DynError> {
 
 pub fn static_commands() -> Result<String, DynError> {
     let mut md = String::new();
-    let keymap = helix_term::keymap::default();
+    let (keymap, _picker_keymap) = helix_term::keymap::default();
     let keymaps = [
         ("normal", keymap[&Mode::Normal].reverse_map()),
         ("select", keymap[&Mode::Select].reverse_map()),

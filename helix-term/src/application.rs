@@ -398,6 +398,26 @@ impl Application {
                 };
                 self.config.store(Arc::new(app_config));
             }
+            ConfigEvent::ThemeToggle => {
+                // Toggle between dark and light theme modes
+                self.theme_mode = Some(match self.theme_mode {
+                    Some(theme::Mode::Dark) => theme::Mode::Light,
+                    Some(theme::Mode::Light) => theme::Mode::Dark,
+                    None => theme::Mode::Light, // Default to light when toggling from unknown
+                });
+                Self::load_configured_theme(
+                    &mut self.editor,
+                    &self.config.load(),
+                    self.terminal.backend().supports_true_color(),
+                    self.theme_mode,
+                );
+                let mode_name = match self.theme_mode {
+                    Some(theme::Mode::Dark) => "dark",
+                    Some(theme::Mode::Light) => "light",
+                    None => "default",
+                };
+                self.editor.set_status(format!("Switched to {} theme", mode_name));
+            }
         }
 
         // Update all the relevant members in the editor after updating

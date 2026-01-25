@@ -441,11 +441,11 @@ mod tests {
                 },
             })
         };
-        let mut merged_keyamp = default();
+        let (mut merged_keyamp, picker_keymap) = default();
         merge_keys(&mut merged_keyamp, keymap.clone());
         assert_ne!(keymap, merged_keyamp);
 
-        let mut keymap = Keymaps::new(Box::new(Constant(merged_keyamp.clone())));
+        let mut keymap = Keymaps::new(Box::new(Constant(merged_keyamp.clone())), picker_keymap);
         assert_eq!(
             keymap.get(Mode::Normal, key!('i')),
             KeymapResult::Matched(MappableCommand::normal_mode),
@@ -513,7 +513,7 @@ mod tests {
                 },
             })
         };
-        let mut merged_keyamp = default();
+        let (mut merged_keyamp, _picker_keymap) = default();
         merge_keys(&mut merged_keyamp, keymap.clone());
         assert_ne!(keymap, merged_keyamp);
         let keymap = merged_keyamp.get_mut(&Mode::Normal).unwrap();

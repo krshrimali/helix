@@ -1304,6 +1304,7 @@ pub enum EditorEvent {
 pub enum ConfigEvent {
     Refresh,
     Update(Box<Config>),
+    ThemeToggle,
 }
 
 /// Request to run an external TUI application (e.g., lazygit)

@@ -166,7 +166,7 @@ mod tests {
             A-F12 = "move_next_word_end"
         "#;
 
-        let mut keys = keymap::default();
+        let (mut keys, _picker_keys) = keymap::default();
         merge_keys(
             &mut keys,
             hashmap! {
@@ -193,10 +193,12 @@ mod tests {
     fn keys_resolve_to_correct_defaults() {
         // From serde default
         let default_keys = Config::load_test("").keys;
-        assert_eq!(default_keys, keymap::default());
+        let (expected_keys, _) = keymap::default();
+        assert_eq!(default_keys, expected_keys);
 
         // From the Default trait
         let default_keys = Config::default().keys;
-        assert_eq!(default_keys, keymap::default());
+        let (expected_keys, _) = keymap::default();
+        assert_eq!(default_keys, expected_keys);
     }
 }
