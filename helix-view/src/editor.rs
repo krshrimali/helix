@@ -434,12 +434,30 @@ pub struct Config {
     /// Whether to enable Kitty Keyboard Protocol
     pub kitty_keyboard_protocol: KittyKeyboardProtocolConfig,
     pub buffer_picker: BufferPickerConfig,
+    /// Quickfix list configuration
+    #[serde(default)]
+    pub quickfix: QuickfixConfig,
 }
 
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, Clone, Copy)]
 #[serde(rename_all = "kebab-case")]
 pub struct BufferPickerConfig {
     pub start_position: PickerStartPosition,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct QuickfixConfig {
+    /// Whether to show line numbers in the quickfix buffer. Defaults to false.
+    pub show_line_numbers: bool,
+}
+
+impl Default for QuickfixConfig {
+    fn default() -> Self {
+        Self {
+            show_line_numbers: false,
+        }
+    }
 }
 
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, Clone, Copy)]
@@ -1156,6 +1174,7 @@ impl Default for Config {
             rainbow_brackets: false,
             kitty_keyboard_protocol: Default::default(),
             buffer_picker: BufferPickerConfig::default(),
+            quickfix: QuickfixConfig::default(),
         }
     }
 }
@@ -1240,7 +1259,10 @@ pub struct Editor {
     pub exit_code: i32,
 
     pub config_events: (UnboundedSender<ConfigEvent>, UnboundedReceiver<ConfigEvent>),
-    pub external_tui_requests: (UnboundedSender<ExternalTuiRequest>, UnboundedReceiver<ExternalTuiRequest>),
+    pub external_tui_requests: (
+        UnboundedSender<ExternalTuiRequest>,
+        UnboundedReceiver<ExternalTuiRequest>,
+    ),
     pub needs_redraw: bool,
     /// Cached position of the cursor calculated during rendering.
     /// The content of `cursor_cache` is returned by `Editor::cursor` if
@@ -1257,6 +1279,8 @@ pub struct Editor {
     pub handlers: Handlers,
 
     pub mouse_down_range: Option<Range>,
+    /// Range to underline when Ctrl+hovering over a word (for goto_reference preview)
+    pub ctrl_hover_range: Option<(ViewId, Range)>,
     pub cursor_cache: CursorCache,
 
     /// The quickfix list for storing and navigating file locations.
@@ -1390,6 +1414,7 @@ impl Editor {
             needs_redraw: false,
             handlers,
             mouse_down_range: None,
+            ctrl_hover_range: None,
             cursor_cache: CursorCache::default(),
             quickfix: QuickfixList::new(),
         }
@@ -1408,7 +1433,10 @@ impl Editor {
     /// Request to run an external TUI application (e.g., lazygit).
     /// The application event loop will handle restoring/claiming the terminal.
     pub fn request_external_tui(&self, program: String, args: Vec<String>) {
-        let _ = self.external_tui_requests.0.send(ExternalTuiRequest { program, args });
+        let _ = self
+            .external_tui_requests
+            .0
+            .send(ExternalTuiRequest { program, args });
     }
 
     pub fn apply_motion<F: Fn(&mut Self) + 'static>(&mut self, motion: F) {
@@ -1943,7 +1971,13 @@ impl Editor {
             return None;
         }
 
-        let content = self.quickfix.to_buffer_content();
+        let config = self.config();
+        let content = self
+            .quickfix
+            .to_buffer_content(config.quickfix.show_line_numbers);
+        let rope = helix_core::Rope::from(content.as_str());
+        // Position cursor at the first item (line 4, 0-indexed line 3)
+        let first_item_pos = rope.line_to_char(3.min(rope.len_lines().saturating_sub(1)));
 
         // Check if we already have a quickfix buffer
         if let Some(doc_id) = self.quickfix_buffer_id() {
@@ -1959,7 +1993,7 @@ impl Editor {
                 &text,
                 [(0, len, Some(content.as_str().into()))].into_iter(),
             )
-            .with_selection(Selection::point(0));
+            .with_selection(Selection::point(first_item_pos));
             doc.apply(&transaction, view_id);
             doc.reset_modified();
 
@@ -1967,12 +2001,7 @@ impl Editor {
             Some(doc_id)
         } else {
             // Create new quickfix buffer
-            let mut doc = Document::from(
-                helix_core::Rope::from(content),
-                None,
-                self.config.clone(),
-                self.syn_loader.clone(),
-            );
+            let mut doc = Document::from(rope, None, self.config.clone(), self.syn_loader.clone());
             // Set custom name so it shows as [quickfix] not [scratch]
             doc.set_custom_name(crate::quickfix::QUICKFIX_BUFFER_NAME);
 
@@ -1981,6 +2010,10 @@ impl Editor {
             // Mark as not modified (it's a generated buffer)
             let doc = self.documents.get_mut(&doc_id)?;
             doc.reset_modified();
+
+            // Position cursor at first item
+            let view_id = self.tree.focus;
+            doc.set_selection(view_id, Selection::point(first_item_pos));
 
             Some(doc_id)
         }

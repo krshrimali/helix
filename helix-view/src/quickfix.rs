@@ -251,9 +251,9 @@ impl QuickfixList {
     }
 
     /// Generate buffer content for the quickfix list.
-    /// Each line format: "path:line:col | text"
+    /// Each line format: "path:line:col | text" (optionally with line numbers prefix)
     /// Returns the content string.
-    pub fn to_buffer_content(&self) -> String {
+    pub fn to_buffer_content(&self, show_line_numbers: bool) -> String {
         let mut content = String::new();
 
         // Add header with title if present
@@ -267,15 +267,26 @@ impl QuickfixList {
 
         for (idx, item) in self.items.iter().enumerate() {
             let kind_str = item.kind.as_deref().map(|k| format!("[{}] ", k)).unwrap_or_default();
-            content.push_str(&format!(
-                "{:>4} | {}:{}:{} | {}{}\n",
-                idx + 1,
-                item.display_path(),
-                item.line + 1,
-                item.col + 1,
-                kind_str,
-                item.text.lines().next().unwrap_or(&item.text)
-            ));
+            if show_line_numbers {
+                content.push_str(&format!(
+                    "{:>4} | {}:{}:{} | {}{}\n",
+                    idx + 1,
+                    item.display_path(),
+                    item.line + 1,
+                    item.col + 1,
+                    kind_str,
+                    item.text.lines().next().unwrap_or(&item.text)
+                ));
+            } else {
+                content.push_str(&format!(
+                    "{}:{}:{} | {}{}\n",
+                    item.display_path(),
+                    item.line + 1,
+                    item.col + 1,
+                    kind_str,
+                    item.text.lines().next().unwrap_or(&item.text)
+                ));
+            }
         }
 
         content

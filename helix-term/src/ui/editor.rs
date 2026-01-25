@@ -14,10 +14,15 @@ use crate::{
 };
 
 use helix_core::{
+    chars::{categorize_char, CharCategory},
     diagnostic::NumberOrString,
     graphemes::{next_grapheme_boundary, prev_grapheme_boundary},
     movement::Direction,
-    syntax::{self, OverlayHighlights},
+    syntax::{
+        self,
+        config::LanguageServerFeature,
+        OverlayHighlights,
+    },
     text_annotations::TextAnnotations,
     unicode::width::UnicodeWidthStr,
     visual_offset_from_block, Change, Position, Range, Selection, Transaction,
@@ -155,6 +160,15 @@ impl EditorView {
             ));
             if let Some(overlay) = Self::highlight_focused_view_elements(view, doc, theme) {
                 overlays.push(overlay);
+            }
+        }
+
+        // Add Ctrl+hover underline for goto_reference preview
+        if let Some((hover_view_id, hover_range)) = editor.ctrl_hover_range {
+            if hover_view_id == view.id {
+                if let Some(scope) = theme.find_highlight_exact("markup.link.url") {
+                    overlays.push(OverlayHighlights::single(scope, hover_range.from()..hover_range.to()));
+                }
             }
         }
 
@@ -1164,7 +1178,14 @@ impl EditorView {
                     let prev_view_id = view!(editor).id;
                     let doc = doc_mut!(editor, &view!(editor, view_id).doc);
 
-                    if modifiers == KeyModifiers::ALT {
+                    if modifiers == KeyModifiers::CONTROL {
+                        // Move cursor to clicked position first, then trigger goto_reference
+                        doc.set_selection(view_id, Selection::point(pos));
+                        // Clear hover underline since we're executing the action
+                        cxt.editor.ctrl_hover_range = None;
+                        commands::MappableCommand::goto_reference.execute(cxt);
+                        return EventResult::Consumed(None);
+                    } else if modifiers == KeyModifiers::ALT {
                         let selection = doc.selection(view_id).clone();
                         doc.set_selection(view_id, selection.push(Range::point(pos)));
                     } else if editor.mode == Mode::Select {
@@ -1328,6 +1349,87 @@ impl EditorView {
                     return EventResult::Consumed(None);
                 }
 
+                EventResult::Ignored(None)
+            }
+
+            MouseEventKind::Moved => {
+                let editor = &mut cxt.editor;
+
+                // Clear hover underline if Ctrl is not held
+                if !modifiers.contains(KeyModifiers::CONTROL) {
+                    if editor.ctrl_hover_range.take().is_some() {
+                        return EventResult::Consumed(None);
+                    }
+                    return EventResult::Ignored(None);
+                }
+
+                // Ctrl is held - check if we're hovering over a word
+                if let Some((pos, view_id)) = pos_and_view(editor, row, column, true) {
+                    let doc = &editor.documents[&editor.tree.get(view_id).doc];
+
+                    // Check if goto_reference is available for this document
+                    let has_goto_ref = doc
+                        .language_servers_with_feature(LanguageServerFeature::GotoReference)
+                        .next()
+                        .is_some();
+
+                    if !has_goto_ref {
+                        if editor.ctrl_hover_range.take().is_some() {
+                            return EventResult::Consumed(None);
+                        }
+                        return EventResult::Ignored(None);
+                    }
+
+                    // Find word boundaries at cursor position
+                    let text = doc.text().slice(..);
+                    if let Some(ch) = text.get_char(pos) {
+                        let cat = categorize_char(ch);
+                        if cat != CharCategory::Whitespace && cat != CharCategory::Eol {
+                            // Find word start (go backward)
+                            let mut word_start = pos;
+                            while word_start > 0 {
+                                let prev_pos = word_start - 1;
+                                if let Some(prev_ch) = text.get_char(prev_pos) {
+                                    if categorize_char(prev_ch) == cat {
+                                        word_start = prev_pos;
+                                    } else {
+                                        break;
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+
+                            // Find word end (go forward)
+                            let mut word_end = pos;
+                            while word_end < text.len_chars() {
+                                if let Some(next_ch) = text.get_char(word_end) {
+                                    if categorize_char(next_ch) == cat {
+                                        word_end += 1;
+                                    } else {
+                                        break;
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+
+                            let new_range = Range::new(word_start, word_end);
+                            let old_range = editor.ctrl_hover_range;
+
+                            if old_range != Some((view_id, new_range)) {
+                                editor.ctrl_hover_range = Some((view_id, new_range));
+                                return EventResult::Consumed(None);
+                            }
+                            return EventResult::Ignored(None);
+                        }
+                    }
+                }
+
+                // Not hovering over a word, clear the range
+                if editor.ctrl_hover_range.take().is_some() {
+                    return EventResult::Consumed(None);
+                }
                 EventResult::Ignored(None)
             }
 
