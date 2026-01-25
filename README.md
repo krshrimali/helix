@@ -23,13 +23,31 @@
 | Feature | Description | Default Keybindings | Configuration |
 |---------|-------------|---------------------|---------------|
 | **Picker Preview Scrolling** | Scroll file previews in pickers | `Alt+Up`/`Alt+Down`, `Ctrl+y`/`Ctrl+e`, or mouse scroll | `picker_preview_scroll = true` |
-| **Quickfix List** | Vim-like quickfix for navigating locations | `Space x x` (open), `]q`/`[q` (next/prev) | N/A |
+| **Quickfix List** | Vim-like quickfix for navigating locations | `Space x x` (open), `]q`/`[q` (next/prev) | `[editor.quickfix]` section |
 | **Send to Quickfix** | Send picker results to quickfix list | `Alt+q` in any picker | `[picker_keys]` section |
 | **Hover Documentation Split** | Open docs in a split instead of popup | `Space h s` (hsplit), `Space h v` (vsplit) | N/A |
 | **Symbol Tree** | LSP symbol outline in a side panel | `Space l o` (vsplit), `Space l O` (hsplit) | N/A |
 | **Breadcrumbs** | Show symbol hierarchy at cursor | `Space l b` | N/A |
 | **Lazygit Integration** | Open lazygit with full terminal control | `Space l g` | `lazygit = "lazygit"` |
 | **Customizable Picker Keys** | Fully customizable picker keybindings | See table below | `[picker_keys]` section |
+| **Ctrl+Click Goto Reference** | Ctrl+Left click to jump to references | `Ctrl+Left Click` | N/A |
+| **Ctrl+Hover Underline** | Underline clickable symbols when Ctrl is held | `Ctrl+Hover` | Requires LSP with goto_reference |
+
+---
+
+### Ctrl+Click Goto Reference
+
+IDE-style Ctrl+Click to jump to references, similar to VS Code behavior.
+
+| Action | Description |
+|--------|-------------|
+| `Ctrl+Left Click` | Move cursor to clicked position and open goto_reference picker |
+| `Ctrl+Hover` | Underline the word under cursor (only if LSP supports goto_reference) |
+
+**How it works:**
+- When you hold `Ctrl` and hover over a symbol, the word is underlined (using your theme's `markup.link.url` style) to indicate it's clickable
+- The underline only appears if the document's language server supports `goto_reference`
+- Clicking while holding `Ctrl` moves the cursor to that position and triggers the references picker
 
 ---
 
@@ -52,6 +70,18 @@ A vim-like quickfix list for storing and navigating file locations (e.g., search
 | `Enter` | `quickfix_jump_to_location` | Jump to location (in quickfix buffer) |
 
 **Sending to Quickfix:** In any picker, press `Alt+q` to send all filtered results to the quickfix list.
+
+**Configuration:**
+
+```toml
+[editor.quickfix]
+# Whether to show line numbers in the quickfix buffer (default: false)
+show-line-numbers = true
+```
+
+**Features:**
+- When opening the quickfix buffer, the cursor automatically starts at the first item
+- Line numbers column can be hidden via configuration for a cleaner look
 
 ---
 
