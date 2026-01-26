@@ -146,6 +146,10 @@ impl Application {
             theme_mode,
         );
 
+        // If the terminal didn't report a theme mode, detect it from the loaded theme's
+        // background color luminance.
+        let theme_mode = theme_mode.or_else(|| Some(editor.theme.mode()));
+
         let keys = Box::new(Map::new(Arc::clone(&config), |config: &Config| {
             &config.keys
         }));
@@ -399,12 +403,22 @@ impl Application {
                 self.config.store(Arc::new(app_config));
             }
             ConfigEvent::ThemeToggle => {
-                // Toggle between dark and light theme modes
+                // Toggle between dark and light theme modes.
+                // theme_mode should always be Some after initialization (detected from terminal
+                // or inferred from theme's background luminance), but handle None defensively.
                 self.theme_mode = Some(match self.theme_mode {
                     Some(theme::Mode::Dark) => theme::Mode::Light,
                     Some(theme::Mode::Light) => theme::Mode::Dark,
-                    None => theme::Mode::Light, // Default to light when toggling from unknown
+                    None => {
+                        // Fallback: detect from current theme's background
+                        if self.editor.theme.is_dark() {
+                            theme::Mode::Light // Toggle to light
+                        } else {
+                            theme::Mode::Dark // Toggle to dark
+                        }
+                    }
                 });
+                // Load the theme corresponding to the new mode.
                 Self::load_configured_theme(
                     &mut self.editor,
                     &self.config.load(),
@@ -416,7 +430,8 @@ impl Application {
                     Some(theme::Mode::Light) => "light",
                     None => "default",
                 };
-                self.editor.set_status(format!("Switched to {} theme", mode_name));
+                self.editor
+                    .set_status(format!("Switched to {} theme", mode_name));
             }
         }
 

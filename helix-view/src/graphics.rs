@@ -369,6 +369,95 @@ impl Color {
             _ => Err(MalformedHex::LenOOB),
         }
     }
+
+    /// Returns the approximate RGB values for this color.
+    /// For indexed colors (ANSI 256), this uses the standard color palette.
+    /// Returns None for Reset color.
+    pub fn to_rgb(&self) -> Option<(u8, u8, u8)> {
+        match *self {
+            Color::Reset => None,
+            Color::Black => Some((0, 0, 0)),
+            Color::Red => Some((128, 0, 0)),
+            Color::Green => Some((0, 128, 0)),
+            Color::Yellow => Some((128, 128, 0)),
+            Color::Blue => Some((0, 0, 128)),
+            Color::Magenta => Some((128, 0, 128)),
+            Color::Cyan => Some((0, 128, 128)),
+            Color::Gray => Some((128, 128, 128)),
+            Color::LightRed => Some((255, 0, 0)),
+            Color::LightGreen => Some((0, 255, 0)),
+            Color::LightYellow => Some((255, 255, 0)),
+            Color::LightBlue => Some((0, 0, 255)),
+            Color::LightMagenta => Some((255, 0, 255)),
+            Color::LightCyan => Some((0, 255, 255)),
+            Color::LightGray => Some((192, 192, 192)),
+            Color::White => Some((255, 255, 255)),
+            Color::Rgb(r, g, b) => Some((r, g, b)),
+            Color::Indexed(i) => Some(Self::indexed_to_rgb(i)),
+        }
+    }
+
+    /// Converts an ANSI 256 color index to RGB.
+    fn indexed_to_rgb(index: u8) -> (u8, u8, u8) {
+        match index {
+            // Standard colors (0-7)
+            0 => (0, 0, 0),       // Black
+            1 => (128, 0, 0),     // Red
+            2 => (0, 128, 0),     // Green
+            3 => (128, 128, 0),   // Yellow
+            4 => (0, 0, 128),     // Blue
+            5 => (128, 0, 128),   // Magenta
+            6 => (0, 128, 128),   // Cyan
+            7 => (192, 192, 192), // White (light gray)
+            // High intensity colors (8-15)
+            8 => (128, 128, 128),  // Bright Black (gray)
+            9 => (255, 0, 0),      // Bright Red
+            10 => (0, 255, 0),     // Bright Green
+            11 => (255, 255, 0),   // Bright Yellow
+            12 => (0, 0, 255),     // Bright Blue
+            13 => (255, 0, 255),   // Bright Magenta
+            14 => (0, 255, 255),   // Bright Cyan
+            15 => (255, 255, 255), // Bright White
+            // 216 color cube (16-231)
+            16..=231 => {
+                let n = index - 16;
+                let b = n % 6;
+                let g = (n / 6) % 6;
+                let r = n / 36;
+                let to_rgb = |v: u8| if v == 0 { 0 } else { 55 + v * 40 };
+                (to_rgb(r), to_rgb(g), to_rgb(b))
+            }
+            // Grayscale (232-255)
+            232..=255 => {
+                let gray = 8 + (index - 232) * 10;
+                (gray, gray, gray)
+            }
+        }
+    }
+
+    /// Computes the relative luminance of this color using the sRGB formula.
+    /// Returns a value between 0.0 (black) and 1.0 (white).
+    /// Returns None for Reset color.
+    pub fn luminance(&self) -> Option<f64> {
+        let (r, g, b) = self.to_rgb()?;
+
+        // Convert to linear RGB (simplified sRGB gamma correction)
+        let to_linear = |c: u8| {
+            let c = c as f64 / 255.0;
+            if c <= 0.03928 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+
+        let r_lin = to_linear(r);
+        let g_lin = to_linear(g);
+        let b_lin = to_linear(b);
+
+        // Relative luminance formula (ITU-R BT.709)
+        Some(0.2126 * r_lin + 0.7152 * g_lin + 0.0722 * b_lin)
+    }
 }
 
 #[cfg(feature = "term")]

@@ -439,6 +439,26 @@ impl Theme {
         &self.name
     }
 
+    /// Determines if this theme is a dark theme based on its background color luminance.
+    /// Returns `true` if the background is dark (luminance < 0.5), `false` if light.
+    /// If the background color cannot be determined, defaults to `true` (dark).
+    pub fn is_dark(&self) -> bool {
+        self.try_get("ui.background")
+            .and_then(|style| style.bg)
+            .and_then(|color| color.luminance())
+            .map(|luminance| luminance < 0.5)
+            .unwrap_or(true) // Default to dark if we can't determine
+    }
+
+    /// Returns the theme mode (Dark or Light) based on the background color.
+    pub fn mode(&self) -> Mode {
+        if self.is_dark() {
+            Mode::Dark
+        } else {
+            Mode::Light
+        }
+    }
+
     pub fn get(&self, scope: &str) -> Style {
         self.try_get(scope).unwrap_or_default()
     }
