@@ -69,7 +69,7 @@
 "markup.italic" = { fg = "or", modifiers = ["italic"] }
 "markup.strikethrough" = { modifiers = ["crossed_out"] }
 "markup.raw.block" = "or"
-"markup.link.url" = "bl"
+"markup.link.url" = { "bl", modifiers = ["underlined"] }
 "markup.link.text" = "ye"
 "markup.link.label" = "gr"
 "markup.quote" = "ye"
