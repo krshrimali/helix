@@ -1117,11 +1117,13 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
                 EditorView::doc_syntax_highlighter(doc, offset.anchor, area.height, &loader);
             let mut overlay_highlights = Vec::new();
 
-            EditorView::doc_diagnostics_highlights_into(
-                doc,
-                &cx.editor.theme,
-                &mut overlay_highlights,
-            );
+            if cx.editor.config().show_diagnostics {
+                EditorView::doc_diagnostics_highlights_into(
+                    doc,
+                    &cx.editor.theme,
+                    &mut overlay_highlights,
+                );
+            }
 
             let mut decorations = DecorationManager::default();
 

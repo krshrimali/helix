@@ -424,6 +424,9 @@ pub struct Config {
     /// Display diagnostic below the line they occur.
     pub inline_diagnostics: InlineDiagnosticsConfig,
     pub end_of_line_diagnostics: DiagnosticFilter,
+    /// Whether to show diagnostics in the editor view. Defaults to `true`.
+    /// When disabled, diagnostics are still available via the picker (`<space>dd`).
+    pub show_diagnostics: bool,
     // Set to override the default clipboard provider
     pub clipboard_provider: ClipboardProvider,
     /// Whether to read settings from [EditorConfig](https://editorconfig.org) files. Defaults to
@@ -1169,6 +1172,7 @@ impl Default for Config {
             jump_label_alphabet: ('a'..='z').collect(),
             inline_diagnostics: InlineDiagnosticsConfig::default(),
             end_of_line_diagnostics: DiagnosticFilter::Enable(Severity::Hint),
+            show_diagnostics: true,
             clipboard_provider: ClipboardProvider::default(),
             editor_config: true,
             rainbow_brackets: false,
