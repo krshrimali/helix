@@ -1,4 +1,5 @@
 use std::io::{self, Write as _};
+use std::process::Command;
 
 use helix_view::{
     editor::KittyKeyboardProtocolConfig,
@@ -44,6 +45,37 @@ fn term_program() -> Option<String> {
 }
 fn vte_version() -> Option<usize> {
     std::env::var("VTE_VERSION").ok()?.parse().ok()
+}
+
+/// Detect if running in WSL (Windows Subsystem for Linux)
+fn is_wsl() -> bool {
+    std::env::var("WSL_DISTRO_NAME").is_ok()
+        || std::env::var("WSL_INTEROP").is_ok()
+        || std::path::Path::new("/proc/sys/fs/binfmt_misc/WSLInterop").exists()
+}
+
+/// Query Windows theme preference via PowerShell (for WSL)
+fn query_windows_theme_from_wsl() -> Option<theme::Mode> {
+    let output = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Get-ItemPropertyValue -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize' -Name AppsUseLightTheme",
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    match stdout.trim() {
+        "0" => Some(theme::Mode::Dark),
+        "1" => Some(theme::Mode::Light),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -213,6 +245,14 @@ impl TerminaBackend {
         }
 
         capabilities.extended_underlines |= config.force_enable_extended_underlines;
+
+        // If terminal didn't report theme mode and we're in WSL, query Windows registry
+        if capabilities.theme_mode.is_none() && is_wsl() {
+            capabilities.theme_mode = query_windows_theme_from_wsl();
+            if capabilities.theme_mode.is_some() {
+                log::debug!("Detected theme mode from Windows registry (WSL): {:?}", capabilities.theme_mode);
+            }
+        }
 
         let mut reset_cursor_command =
             Csi::Cursor(csi::Cursor::CursorStyle(CursorStyle::Default)).to_string();
