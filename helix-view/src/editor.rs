@@ -316,6 +316,10 @@ pub struct Config {
     pub gutters: GutterConfig,
     /// Middle click paste support. Defaults to true.
     pub middle_click_paste: bool,
+    /// Middle click to open hover documentation in a split. Defaults to false.
+    pub middle_click_hover: bool,
+    /// Split direction for middle click hover: "horizontal" or "vertical". Defaults to "horizontal".
+    pub middle_click_hover_split: MiddleClickHoverSplit,
     /// Automatic insertion of pairs to parentheses, brackets,
     /// etc. Optionally, this can be a list of 2-tuples to specify a
     /// global list of characters to pair. Defaults to true.
@@ -464,6 +468,15 @@ impl Default for QuickfixConfig {
             show_line_numbers: false,
         }
     }
+}
+
+/// Split direction for middle click hover documentation
+#[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, Clone, Copy)]
+#[serde(rename_all = "kebab-case")]
+pub enum MiddleClickHoverSplit {
+    #[default]
+    Horizontal,
+    Vertical,
 }
 
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, Clone, Copy)]
@@ -1130,6 +1143,8 @@ impl Default for Config {
             cursorcolumn: false,
             gutters: GutterConfig::default(),
             middle_click_paste: true,
+            middle_click_hover: false,
+            middle_click_hover_split: MiddleClickHoverSplit::default(),
             auto_pairs: AutoPairConfig::default(),
             auto_completion: true,
             path_completion: true,

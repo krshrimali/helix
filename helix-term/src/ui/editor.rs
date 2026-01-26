@@ -1353,6 +1353,29 @@ impl EditorView {
 
             MouseEventKind::Up(MouseButton::Middle) => {
                 let editor = &mut cxt.editor;
+
+                // Middle click hover takes priority if enabled
+                if config.middle_click_hover {
+                    if let Some((pos, view_id)) = pos_and_view(editor, row, column, true) {
+                        let doc = doc_mut!(editor, &view!(editor, view_id).doc);
+                        doc.set_selection(view_id, Selection::point(pos));
+                        cxt.editor.focus(view_id);
+
+                        // Open hover in the configured split direction
+                        use helix_view::editor::MiddleClickHoverSplit;
+                        match config.middle_click_hover_split {
+                            MiddleClickHoverSplit::Horizontal => {
+                                commands::MappableCommand::hover_hsplit.execute(cxt);
+                            }
+                            MiddleClickHoverSplit::Vertical => {
+                                commands::MappableCommand::hover_vsplit.execute(cxt);
+                            }
+                        }
+                        return EventResult::Consumed(None);
+                    }
+                }
+
+                // Fall back to middle click paste if enabled
                 if !config.middle_click_paste {
                     return EventResult::Ignored(None);
                 }
