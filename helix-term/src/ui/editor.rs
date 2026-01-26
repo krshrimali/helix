@@ -1491,8 +1491,6 @@ impl EditorView {
                                 MouseHoverEvent::Moved {
                                     view_id,
                                     char_pos: pos,
-                                    screen_row: row,
-                                    screen_col: column,
                                     delay: hover_delay,
                                 },
                             );

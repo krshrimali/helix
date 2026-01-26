@@ -41,6 +41,8 @@ pub struct Popup<T: Component> {
     has_scrollbar: bool,
     /// Whether the popup is in focused mode, allowing search and navigation.
     focused: bool,
+    /// When true, use the explicitly set position instead of following the cursor.
+    fixed_position: bool,
 }
 
 impl<T: Component> Popup<T> {
@@ -56,6 +58,7 @@ impl<T: Component> Popup<T> {
             id,
             has_scrollbar: true,
             focused: false,
+            fixed_position: false,
         }
     }
 
@@ -65,6 +68,13 @@ impl<T: Component> Popup<T> {
     /// but rather the screen-space position of the information to which the popup refers.
     pub fn position(mut self, pos: Option<Position>) -> Self {
         self.position = pos;
+        self
+    }
+
+    /// When set to true, the popup will use the explicitly set position
+    /// instead of following the editor cursor. Useful for mouse-triggered popups.
+    pub fn fixed_position(mut self, fixed: bool) -> Self {
+        self.fixed_position = fixed;
         self
     }
 
@@ -146,15 +156,22 @@ impl<T: Component> Popup<T> {
     }
 
     fn render_info(&mut self, viewport: Rect, editor: &Editor) -> RenderInfo {
-        let mut position = editor.cursor().0.unwrap_or_default();
-        if let Some(old_position) = self
-            .position
-            .filter(|old_position| old_position.row == position.row)
-        {
-            position = old_position;
+        let position = if self.fixed_position {
+            // Use the explicitly set position, falling back to cursor
+            self.position.unwrap_or_else(|| editor.cursor().0.unwrap_or_default())
         } else {
-            self.position = Some(position);
-        }
+            // Follow cursor, but preserve column if on the same row
+            let cursor_pos = editor.cursor().0.unwrap_or_default();
+            if let Some(old_position) = self
+                .position
+                .filter(|old_position| old_position.row == cursor_pos.row)
+            {
+                old_position
+            } else {
+                self.position = Some(cursor_pos);
+                cursor_pos
+            }
+        };
 
         let is_menu = self
             .contents

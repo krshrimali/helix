@@ -37,8 +37,6 @@ pub enum MouseHoverEvent {
     Moved {
         view_id: ViewId,
         char_pos: usize,
-        screen_row: u16,
-        screen_col: u16,
         delay: Duration,
     },
     /// Cancel pending hover request

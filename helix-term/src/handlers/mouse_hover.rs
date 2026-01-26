@@ -1,5 +1,4 @@
 use helix_core::syntax::config::LanguageServerFeature;
-use helix_core::Position;
 use helix_event::{cancelable_future, send_blocking, TaskController, TaskHandle};
 use helix_lsp::lsp;
 use helix_view::handlers::lsp::MouseHoverEvent;
@@ -17,8 +16,6 @@ use crate::job;
 struct PendingHover {
     view_id: ViewId,
     char_pos: usize,
-    screen_row: u16,
-    screen_col: u16,
 }
 
 #[derive(Debug)]
@@ -48,8 +45,6 @@ impl helix_event::AsyncHook for MouseHoverHandler {
             MouseHoverEvent::Moved {
                 view_id,
                 char_pos,
-                screen_row,
-                screen_col,
                 delay,
             } => {
                 // Check if position has changed
@@ -73,8 +68,6 @@ impl helix_event::AsyncHook for MouseHoverHandler {
                 self.pending = Some(PendingHover {
                     view_id,
                     char_pos,
-                    screen_row,
-                    screen_col,
                 });
 
                 // Return the debounce timeout using the configured delay
@@ -141,8 +134,7 @@ fn request_mouse_hover(editor: &mut Editor, pending: PendingHover, cancel: TaskH
         return;
     }
 
-    let screen_row = pending.screen_row;
-    let screen_col = pending.screen_col;
+    let view_id = pending.view_id;
 
     // Build the futures for all language servers that support hover
     use futures_util::stream::FuturesOrdered;
@@ -187,7 +179,7 @@ fn request_mouse_hover(editor: &mut Editor, pending: PendingHover, cancel: TaskH
         .await
         {
             job::dispatch(move |editor, compositor| {
-                show_mouse_hover(editor, compositor, hovers, screen_row, screen_col)
+                show_mouse_hover(editor, compositor, hovers, view_id, char_pos)
             })
             .await
         }
@@ -198,8 +190,8 @@ fn show_mouse_hover(
     editor: &mut Editor,
     compositor: &mut Compositor,
     hovers: Vec<(String, lsp::Hover)>,
-    screen_row: u16,
-    screen_col: u16,
+    view_id: ViewId,
+    char_pos: usize,
 ) {
     send_blocking(
         &editor.handlers.mouse_hover,
@@ -213,10 +205,22 @@ fn show_mouse_hover(
         return;
     }
 
-    // Create the hover popup
+    // Compute screen position from character position
+    let position = editor
+        .tree
+        .try_get(view_id)
+        .and_then(|view| {
+            let doc = editor.documents.get(&view.doc)?;
+            let text = doc.text().slice(..);
+            view.screen_coords_at_pos(doc, text, char_pos)
+        })
+        .unwrap_or_default();
+
+    // Create the hover popup with fixed positioning (won't follow cursor)
     let contents = Hover::new(hovers, editor.syn_loader.clone());
     let popup = Popup::new(MOUSE_HOVER_ID, contents)
-        .position(Some(Position::new(screen_row as usize, screen_col as usize)))
+        .position(Some(position))
+        .fixed_position(true)
         .auto_close(true);
 
     compositor.replace_or_push(MOUSE_HOVER_ID, popup);
