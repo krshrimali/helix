@@ -247,7 +247,8 @@ impl TerminaBackend {
         capabilities.extended_underlines |= config.force_enable_extended_underlines;
 
         // If terminal didn't report theme mode and we're in WSL, query Windows registry
-        if capabilities.theme_mode.is_none() && is_wsl() {
+        // Only do this if detect_system_theme is enabled, as it can slow down startup
+        if config.detect_system_theme && capabilities.theme_mode.is_none() && is_wsl() {
             capabilities.theme_mode = query_windows_theme_from_wsl();
             if capabilities.theme_mode.is_some() {
                 log::debug!("Detected theme mode from Windows registry (WSL): {:?}", capabilities.theme_mode);

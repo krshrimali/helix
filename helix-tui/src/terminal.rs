@@ -26,6 +26,7 @@ pub struct Config {
     pub enable_mouse_capture: bool,
     pub force_enable_extended_underlines: bool,
     pub kitty_keyboard_protocol: KittyKeyboardProtocolConfig,
+    pub detect_system_theme: bool,
 }
 
 impl From<&EditorConfig> for Config {
@@ -34,6 +35,7 @@ impl From<&EditorConfig> for Config {
             enable_mouse_capture: config.mouse,
             force_enable_extended_underlines: config.undercurl,
             kitty_keyboard_protocol: config.kitty_keyboard_protocol,
+            detect_system_theme: config.detect_system_theme,
         }
     }
 }

@@ -376,6 +376,9 @@ pub struct Config {
     pub true_color: bool,
     /// Set to `true` to override automatic detection of terminal undercurl support in the event of a false negative. Defaults to `false`.
     pub undercurl: bool,
+    /// Set to `true` to enable detection of the system theme (light/dark mode) from the operating system.
+    /// On Windows and WSL, this queries the Windows registry which may slow down startup. Defaults to `false`.
+    pub detect_system_theme: bool,
     /// Search configuration.
     #[serde(default)]
     pub search: SearchConfig,
@@ -1145,6 +1148,7 @@ impl Default for Config {
             cursor_shape: CursorShapeConfig::default(),
             true_color: false,
             undercurl: false,
+            detect_system_theme: false,
             search: SearchConfig::default(),
             lsp: LspConfig::default(),
             terminal: get_terminal_provider(),

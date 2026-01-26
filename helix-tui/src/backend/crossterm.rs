@@ -327,6 +327,12 @@ where
     }
 
     fn get_theme_mode(&self) -> Option<helix_view::theme::Mode> {
+        // Only query Windows Registry if detect_system_theme is enabled,
+        // as registry access can slow down startup
+        if !self.config.detect_system_theme {
+            return None;
+        }
+
         // Query Windows Registry for the system theme preference
         // Path: HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize
         // Value: AppsUseLightTheme (0 = Dark, 1 = Light)
@@ -335,7 +341,7 @@ where
             .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
             .ok()?;
         let use_light_theme: u32 = personalize.get_value("AppsUseLightTheme").ok()?;
-        log::warn!("Am I using light theme {use_light_theme}?");
+        log::debug!("Detected Windows theme from registry: light={use_light_theme}");
         Some(if use_light_theme == 0 {
             helix_view::theme::Mode::Dark
         } else {
