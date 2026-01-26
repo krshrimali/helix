@@ -28,3 +28,4 @@ log = "~0.4"
 
 [target.'cfg(windows)'.dependencies]
 crossterm = { version = "0.28", optional = true }
+winreg = "0.55"

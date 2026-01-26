@@ -21,6 +21,7 @@ use std::{
     io::{self, Write},
 };
 use termini::TermInfo;
+use winreg::{enums::HKEY_CURRENT_USER, RegKey};
 
 fn term_program() -> Option<String> {
     // Some terminals don't set $TERM_PROGRAM
@@ -326,7 +327,20 @@ where
     }
 
     fn get_theme_mode(&self) -> Option<helix_view::theme::Mode> {
-        None
+        // Query Windows Registry for the system theme preference
+        // Path: HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize
+        // Value: AppsUseLightTheme (0 = Dark, 1 = Light)
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let personalize = hkcu
+            .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+            .ok()?;
+        let use_light_theme: u32 = personalize.get_value("AppsUseLightTheme").ok()?;
+        log::warn!("Am I using light theme {use_light_theme}?");
+        Some(if use_light_theme == 0 {
+            helix_view::theme::Mode::Dark
+        } else {
+            helix_view::theme::Mode::Light
+        })
     }
 }
 
