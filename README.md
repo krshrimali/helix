@@ -22,6 +22,7 @@
 
 | Feature | Description | Default Keybindings | Configuration |
 |---------|-------------|---------------------|---------------|
+| **Toggle Diagnostics** | Hide/show diagnostics in editor view | `:toggle show-diagnostics` | `show-diagnostics = true` |
 | **Picker Preview Scrolling** | Scroll file previews in pickers | `Alt+Up`/`Alt+Down`, `Ctrl+y`/`Ctrl+e`, or mouse scroll | `picker_preview_scroll = true` |
 | **Quickfix List** | Vim-like quickfix for navigating locations | `Space x x` (open), `]q`/`[q` (next/prev) | `[editor.quickfix]` section |
 | **Send to Quickfix** | Send picker results to quickfix list | `Alt+q` in any picker | `[picker_keys]` section |
@@ -32,6 +33,30 @@
 | **Customizable Picker Keys** | Fully customizable picker keybindings | See table below | `[picker_keys]` section |
 | **Ctrl+Click Goto Reference** | Ctrl+Left click to jump to references | `Ctrl+Left Click` | N/A |
 | **Ctrl+Hover Underline** | Underline clickable symbols when Ctrl is held | `Ctrl+Hover` | Requires LSP with goto_reference |
+
+---
+
+### Toggle Diagnostics
+
+Hide or show diagnostics in the editor view. When disabled, diagnostic highlights, inline diagnostics, and end-of-line diagnostics are all hidden. Diagnostics remain accessible via pickers (`Space d` for buffer diagnostics, `Space D` for workspace diagnostics).
+
+**Toggle via command:**
+```
+:toggle show-diagnostics
+```
+
+**Configuration:**
+```toml
+[editor]
+# Whether to show diagnostics in the editor view (default: true)
+show-diagnostics = false
+```
+
+**Custom keybinding example:**
+```toml
+[keys.normal.space]
+D = ":toggle show-diagnostics"
+```
 
 ---
 
@@ -193,6 +218,10 @@ Add to `[editor]` section in `config.toml`:
 [editor]
 # Enable mouse scrolling in picker preview panels (default: true)
 picker_preview_scroll = true
+
+# Show/hide diagnostics in editor view (default: true)
+# When false, diagnostics are still available via pickers (Space d, Space D)
+show-diagnostics = true
 ```
 
 ![Screenshot](./screenshot.png)
