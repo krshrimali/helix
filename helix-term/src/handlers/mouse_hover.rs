@@ -59,10 +59,9 @@ impl helix_event::AsyncHook for MouseHoverHandler {
                 // stale popups from appearing at wrong locations
                 self.task_controller.cancel();
 
-                // Close any existing popup since we're moving to a new position
-                job::dispatch_blocking(|_editor, compositor| {
-                    compositor.remove(MOUSE_HOVER_ID);
-                });
+                // Don't close the existing popup here - let the user interact with it.
+                // The popup will be replaced when the new hover request completes,
+                // or closed via auto_close when user clicks outside/presses a key.
 
                 // Store the new pending hover request
                 self.pending = Some(PendingHover {
@@ -201,8 +200,21 @@ fn show_mouse_hover(
     );
 
     if hovers.is_empty() {
-        compositor.remove(MOUSE_HOVER_ID);
+        // Only remove if the popup is not focused
+        if let Some(popup) = compositor.find_id::<Popup<Hover>>(MOUSE_HOVER_ID) {
+            if !popup.is_focused() {
+                compositor.remove(MOUSE_HOVER_ID);
+            }
+        }
         return;
+    }
+
+    // Check if there's an existing focused popup - don't replace it
+    if let Some(existing_popup) = compositor.find_id::<Popup<Hover>>(MOUSE_HOVER_ID) {
+        if existing_popup.is_focused() {
+            // User is interacting with the popup, don't replace it
+            return;
+        }
     }
 
     // Compute screen position from character position

@@ -265,19 +265,25 @@ impl<T: Component> Popup<T> {
             ..
         }: &MouseEvent,
     ) -> EventResult {
-        if self.auto_close && matches!(kind, MouseEventKind::Down(_)) {
-            let close_fn: Callback = Box::new(|compositor, _| {
-                // remove the layer
-                compositor.remove(self.id.as_ref());
-            });
-
-            return EventResult::Ignored(Some(close_fn));
-        }
-
         let mouse_is_within_popup = x >= self.area.left()
             && x < self.area.right()
             && y >= self.area.top()
             && y < self.area.bottom();
+
+        // Handle clicks
+        if matches!(kind, MouseEventKind::Down(_)) {
+            if mouse_is_within_popup {
+                // Click inside popup - enter focused mode and consume the event
+                self.set_focused(true);
+                return EventResult::Consumed(None);
+            } else if self.auto_close {
+                // Click outside popup with auto_close - close the popup
+                let close_fn: Callback = Box::new(|compositor, _| {
+                    compositor.remove(self.id.as_ref());
+                });
+                return EventResult::Ignored(Some(close_fn));
+            }
+        }
 
         if !mouse_is_within_popup {
             return EventResult::Ignored(None);
@@ -292,6 +298,8 @@ impl<T: Component> Popup<T> {
                 self.scroll_half_page_up();
                 EventResult::Consumed(None)
             }
+            // Mouse move inside popup - consume to prevent editor from processing
+            MouseEventKind::Moved => EventResult::Consumed(None),
             _ => EventResult::Ignored(None),
         }
     }
