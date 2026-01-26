@@ -18,11 +18,7 @@ use helix_core::{
     diagnostic::NumberOrString,
     graphemes::{next_grapheme_boundary, prev_grapheme_boundary},
     movement::Direction,
-    syntax::{
-        self,
-        config::LanguageServerFeature,
-        OverlayHighlights,
-    },
+    syntax::{self, config::LanguageServerFeature, OverlayHighlights},
     text_annotations::TextAnnotations,
     unicode::width::UnicodeWidthStr,
     visual_offset_from_block, Change, Position, Range, Selection, Transaction,
@@ -169,7 +165,10 @@ impl EditorView {
         if let Some((hover_view_id, hover_range)) = editor.ctrl_hover_range {
             if hover_view_id == view.id {
                 if let Some(scope) = theme.find_highlight_exact("markup.link.url") {
-                    overlays.push(OverlayHighlights::single(scope, hover_range.from()..hover_range.to()));
+                    overlays.push(OverlayHighlights::single(
+                        scope,
+                        hover_range.from()..hover_range.to(),
+                    ));
                 }
             }
         }
@@ -1189,7 +1188,7 @@ impl EditorView {
                         doc.set_selection(view_id, Selection::point(pos));
                         // Clear hover underline since we're executing the action
                         cxt.editor.ctrl_hover_range = None;
-                        commands::MappableCommand::goto_reference.execute(cxt);
+                        commands::MappableCommand::goto_definition.execute(cxt);
                         return EventResult::Consumed(None);
                     } else if modifiers == KeyModifiers::ALT {
                         let selection = doc.selection(view_id).clone();
@@ -1236,6 +1235,25 @@ impl EditorView {
                 }
 
                 EventResult::Ignored(None)
+            }
+
+            MouseEventKind::Down(MouseButton::Right) => {
+                let editor = &mut cxt.editor;
+
+                if let Some((pos, view_id)) = pos_and_view(editor, row, column, true) {
+                    editor.focus(view_id);
+
+                    let doc = doc_mut!(editor, &view!(editor, view_id).doc);
+
+                    if modifiers == KeyModifiers::CONTROL {
+                        doc.set_selection(view_id, Selection::point(pos));
+                        cxt.editor.ctrl_hover_range = None;
+                        commands::MappableCommand::goto_reference.execute(cxt);
+                        return EventResult::Consumed(None);
+                    }
+                    return EventResult::Ignored(None);
+                }
+                return EventResult::Ignored(None);
             }
 
             MouseEventKind::Drag(MouseButton::Left) => {
