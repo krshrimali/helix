@@ -1,12 +1,13 @@
 use std::collections::btree_map::Entry;
 use std::collections::HashSet;
 use std::fmt::Display;
+use std::time::Duration;
 
 use crate::editor::Action;
 use crate::events::{
     DiagnosticsDidChange, DocumentDidChange, DocumentDidClose, LanguageServerInitialized,
 };
-use crate::{DocumentId, Editor};
+use crate::{DocumentId, Editor, ViewId};
 use helix_core::diagnostic::DiagnosticProvider;
 use helix_core::Uri;
 use helix_event::register_hook;
@@ -28,6 +29,21 @@ pub enum SignatureHelpEvent {
     Trigger,
     ReTrigger,
     Cancel,
+    RequestComplete { open: bool },
+}
+
+pub enum MouseHoverEvent {
+    /// Mouse moved to a new position
+    Moved {
+        view_id: ViewId,
+        char_pos: usize,
+        screen_row: u16,
+        screen_col: u16,
+        delay: Duration,
+    },
+    /// Cancel pending hover request
+    Cancel,
+    /// Request completed
     RequestComplete { open: bool },
 }
 

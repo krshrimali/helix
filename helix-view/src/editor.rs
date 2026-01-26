@@ -588,6 +588,14 @@ pub struct LspConfig {
     pub snippets: bool,
     /// Whether to include declaration in the goto reference query
     pub goto_reference_include_declaration: bool,
+    /// Enable mouse hover to show documentation popup
+    pub mouse_hover: bool,
+    /// Delay in milliseconds before showing mouse hover documentation
+    #[serde(
+        serialize_with = "serialize_duration_millis",
+        deserialize_with = "deserialize_duration_millis"
+    )]
+    pub mouse_hover_delay: Duration,
 }
 
 impl Default for LspConfig {
@@ -603,6 +611,8 @@ impl Default for LspConfig {
             snippets: true,
             goto_reference_include_declaration: true,
             display_color_swatches: true,
+            mouse_hover: true,
+            mouse_hover_delay: Duration::from_millis(500),
         }
     }
 }

@@ -28,10 +28,12 @@ use helix_view::{
     document::{Mode, SCRATCH_BUFFER_NAME},
     editor::{CompleteAction, CursorShapeConfig},
     graphics::{Color, CursorKind, Modifier, Rect, Style},
+    handlers::lsp::MouseHoverEvent,
     input::{KeyEvent, MouseButton, MouseEvent, MouseEventKind},
     keyboard::{KeyCode, KeyModifiers},
     Document, Editor, Theme, View,
 };
+use helix_event::send_blocking;
 use std::{mem::take, num::NonZeroUsize, ops, path::PathBuf, rc::Rc};
 
 use tui::{buffer::Buffer as Surface, text::Span};
@@ -1177,6 +1179,9 @@ impl EditorView {
             MouseEventKind::Down(MouseButton::Left) => {
                 let editor = &mut cxt.editor;
 
+                // Cancel any pending mouse hover request on click
+                send_blocking(&editor.handlers.mouse_hover, MouseHoverEvent::Cancel);
+
                 if let Some((pos, view_id)) = pos_and_view(editor, row, column, true) {
                     editor.focus(view_id);
 
@@ -1239,6 +1244,9 @@ impl EditorView {
 
             MouseEventKind::Down(MouseButton::Right) => {
                 let editor = &mut cxt.editor;
+
+                // Cancel any pending mouse hover request on click
+                send_blocking(&editor.handlers.mouse_hover, MouseHoverEvent::Cancel);
 
                 if let Some((pos, view_id)) = pos_and_view(editor, row, column, true) {
                     editor.focus(view_id);
@@ -1379,81 +1387,122 @@ impl EditorView {
             MouseEventKind::Moved => {
                 let editor = &mut cxt.editor;
 
-                // Clear hover underline if Ctrl is not held
-                if !modifiers.contains(KeyModifiers::CONTROL) {
+                // Handle Ctrl+hover underline for goto_reference
+                if modifiers.contains(KeyModifiers::CONTROL) {
+                    // Cancel any pending mouse hover request when Ctrl is pressed
+                    send_blocking(&editor.handlers.mouse_hover, MouseHoverEvent::Cancel);
+
+                    // Ctrl is held - check if we're hovering over a word
+                    if let Some((pos, view_id)) = pos_and_view(editor, row, column, true) {
+                        let doc = &editor.documents[&editor.tree.get(view_id).doc];
+
+                        // Check if goto_reference is available for this document
+                        let has_goto_ref = doc
+                            .language_servers_with_feature(LanguageServerFeature::GotoReference)
+                            .next()
+                            .is_some();
+
+                        if !has_goto_ref {
+                            if editor.ctrl_hover_range.take().is_some() {
+                                return EventResult::Consumed(None);
+                            }
+                            return EventResult::Ignored(None);
+                        }
+
+                        // Find word boundaries at cursor position
+                        let text = doc.text().slice(..);
+                        if let Some(ch) = text.get_char(pos) {
+                            let cat = categorize_char(ch);
+                            if cat != CharCategory::Whitespace && cat != CharCategory::Eol {
+                                // Find word start (go backward)
+                                let mut word_start = pos;
+                                while word_start > 0 {
+                                    let prev_pos = word_start - 1;
+                                    if let Some(prev_ch) = text.get_char(prev_pos) {
+                                        if categorize_char(prev_ch) == cat {
+                                            word_start = prev_pos;
+                                        } else {
+                                            break;
+                                        }
+                                    } else {
+                                        break;
+                                    }
+                                }
+
+                                // Find word end (go forward)
+                                let mut word_end = pos;
+                                while word_end < text.len_chars() {
+                                    if let Some(next_ch) = text.get_char(word_end) {
+                                        if categorize_char(next_ch) == cat {
+                                            word_end += 1;
+                                        } else {
+                                            break;
+                                        }
+                                    } else {
+                                        break;
+                                    }
+                                }
+
+                                let new_range = Range::new(word_start, word_end);
+                                let old_range = editor.ctrl_hover_range;
+
+                                if old_range != Some((view_id, new_range)) {
+                                    editor.ctrl_hover_range = Some((view_id, new_range));
+                                    return EventResult::Consumed(None);
+                                }
+                                return EventResult::Ignored(None);
+                            }
+                        }
+                    }
+
+                    // Not hovering over a word, clear the range
                     if editor.ctrl_hover_range.take().is_some() {
                         return EventResult::Consumed(None);
                     }
                     return EventResult::Ignored(None);
                 }
 
-                // Ctrl is held - check if we're hovering over a word
+                // Ctrl is NOT held - handle mouse hover documentation
+                // First, clear ctrl_hover_range if set
+                if editor.ctrl_hover_range.take().is_some() {
+                    // Also cancel any pending mouse hover since position changed
+                    send_blocking(&editor.handlers.mouse_hover, MouseHoverEvent::Cancel);
+                    return EventResult::Consumed(None);
+                }
+
+                // Check if mouse hover is enabled
+                if !editor.config().lsp.mouse_hover {
+                    return EventResult::Ignored(None);
+                }
+
+                // Get the character position under the mouse
+                let hover_delay = editor.config().lsp.mouse_hover_delay;
                 if let Some((pos, view_id)) = pos_and_view(editor, row, column, true) {
                     let doc = &editor.documents[&editor.tree.get(view_id).doc];
 
-                    // Check if goto_reference is available for this document
-                    let has_goto_ref = doc
-                        .language_servers_with_feature(LanguageServerFeature::GotoReference)
-                        .next()
-                        .is_some();
-
-                    if !has_goto_ref {
-                        if editor.ctrl_hover_range.take().is_some() {
-                            return EventResult::Consumed(None);
-                        }
-                        return EventResult::Ignored(None);
-                    }
-
-                    // Find word boundaries at cursor position
+                    // Check if we're over a word (not whitespace)
                     let text = doc.text().slice(..);
                     if let Some(ch) = text.get_char(pos) {
                         let cat = categorize_char(ch);
                         if cat != CharCategory::Whitespace && cat != CharCategory::Eol {
-                            // Find word start (go backward)
-                            let mut word_start = pos;
-                            while word_start > 0 {
-                                let prev_pos = word_start - 1;
-                                if let Some(prev_ch) = text.get_char(prev_pos) {
-                                    if categorize_char(prev_ch) == cat {
-                                        word_start = prev_pos;
-                                    } else {
-                                        break;
-                                    }
-                                } else {
-                                    break;
-                                }
-                            }
-
-                            // Find word end (go forward)
-                            let mut word_end = pos;
-                            while word_end < text.len_chars() {
-                                if let Some(next_ch) = text.get_char(word_end) {
-                                    if categorize_char(next_ch) == cat {
-                                        word_end += 1;
-                                    } else {
-                                        break;
-                                    }
-                                } else {
-                                    break;
-                                }
-                            }
-
-                            let new_range = Range::new(word_start, word_end);
-                            let old_range = editor.ctrl_hover_range;
-
-                            if old_range != Some((view_id, new_range)) {
-                                editor.ctrl_hover_range = Some((view_id, new_range));
-                                return EventResult::Consumed(None);
-                            }
-                            return EventResult::Ignored(None);
+                            // We're over a word, send hover event
+                            send_blocking(
+                                &editor.handlers.mouse_hover,
+                                MouseHoverEvent::Moved {
+                                    view_id,
+                                    char_pos: pos,
+                                    screen_row: row,
+                                    screen_col: column,
+                                    delay: hover_delay,
+                                },
+                            );
                         }
                     }
                 }
 
-                // Not hovering over a word, clear the range
-                if editor.ctrl_hover_range.take().is_some() {
-                    return EventResult::Consumed(None);
-                }
+                // Don't cancel on whitespace movement - allows user to move mouse
+                // to the popup for scrolling. Popup closes via auto_close on click
+                // or keyboard input, or is replaced when hovering over a new word.
                 EventResult::Ignored(None)
             }
 
