@@ -60,6 +60,15 @@ impl helix_event::AsyncHook for MouseHoverHandler {
                     }
                 }
 
+                // Position changed - cancel any in-flight request to prevent
+                // stale popups from appearing at wrong locations
+                self.task_controller.cancel();
+
+                // Close any existing popup since we're moving to a new position
+                job::dispatch_blocking(|_editor, compositor| {
+                    compositor.remove(MOUSE_HOVER_ID);
+                });
+
                 // Store the new pending hover request
                 self.pending = Some(PendingHover {
                     view_id,
