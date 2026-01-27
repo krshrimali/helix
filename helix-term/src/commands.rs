@@ -1,9 +1,11 @@
 pub(crate) mod dap;
 pub(crate) mod lsp;
+pub(crate) mod oil;
 pub(crate) mod syntax;
 pub(crate) mod typed;
 
 pub use dap::*;
+pub use oil::*;
 use futures_util::FutureExt;
 use helix_event::status;
 use helix_stdx::{
@@ -439,6 +441,13 @@ impl MappableCommand {
         quickfix_last, "Go to last quickfix item",
         quickfix_clear, "Clear quickfix list",
         quickfix_jump_to_location, "Jump to quickfix item at cursor line",
+        oil_open, "Open oil file manager at workspace root",
+        oil_open_cwd, "Open oil file manager at current directory",
+        oil_open_buffer_dir, "Open oil file manager at buffer's directory",
+        oil_enter, "Open file or directory in oil buffer",
+        oil_parent, "Navigate to parent directory in oil buffer",
+        oil_toggle_hidden, "Toggle hidden files in oil buffer",
+        oil_refresh, "Refresh oil buffer",
         insert_at_line_start, "Insert at start of line",
         insert_at_line_end, "Insert at end of line",
         open_below, "Open new line below selection",
@@ -3429,9 +3438,18 @@ fn quickfix_picker_vsplit(cx: &mut Context) {
 /// When there are multiple views (splits), the file opens in another view,
 /// preserving the quickfix buffer in its current view.
 fn quickfix_jump_to_location(cx: &mut Context) {
-    // Check if we're in the quickfix buffer
-    let (view, doc) = current!(cx.editor);
-    let is_quickfix_buffer = doc.custom_name() == Some(helix_view::quickfix::QUICKFIX_BUFFER_NAME);
+    // Check if we're in the quickfix buffer or oil buffer
+    let (doc_id, is_quickfix_buffer) = {
+        let (_, doc) = current!(cx.editor);
+        (doc.id(), doc.custom_name() == Some(helix_view::quickfix::QUICKFIX_BUFFER_NAME))
+    };
+    let is_oil_buffer = cx.editor.is_oil_buffer(doc_id);
+
+    if is_oil_buffer {
+        // Delegate to oil_enter for oil buffers
+        oil::oil_enter(cx);
+        return;
+    }
 
     if !is_quickfix_buffer {
         // Not in quickfix buffer - silent no-op to allow Enter binding in normal mode
@@ -3439,6 +3457,7 @@ fn quickfix_jump_to_location(cx: &mut Context) {
     }
 
     // Get the current line number
+    let (view, doc) = current!(cx.editor);
     let text = doc.text().slice(..);
     let cursor_pos = doc.selection(view.id).primary().cursor(text);
     let current_line = text.char_to_line(cursor_pos);

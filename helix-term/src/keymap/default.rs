@@ -189,8 +189,10 @@ pub fn default() -> (HashMap<Mode, KeyTrie>, PickerKeymap) {
 
         "A-:" => ensure_selections_forward,
 
-        // Enter jumps to location when in quickfix buffer, no-op otherwise
+        // Enter jumps to location when in quickfix/oil buffer, no-op otherwise
         "ret" => quickfix_jump_to_location,
+        // Backspace goes to parent directory in oil buffer, no-op otherwise
+        "backspace" => oil_parent,
 
         "esc" => normal_mode,
         "C-b" | "pageup" => page_up,
@@ -261,6 +263,11 @@ pub fn default() -> (HashMap<Mode, KeyTrie>, PickerKeymap) {
             "o" => symbol_tree,
             "O" => symbol_tree_hsplit,
             "B" => breadcrumbs,
+            "-" => { "Oil file manager"
+                "-" => oil_open,
+                "." => oil_open_cwd,
+                "b" => oil_open_buffer_dir,
+            },
             "G" => { "Debug (experimental)" sticky=true
                 "l" => dap_launch,
                 "r" => dap_restart,

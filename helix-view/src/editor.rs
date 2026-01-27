@@ -9,6 +9,7 @@ use crate::{
     handlers::Handlers,
     info::Info,
     input::KeyEvent,
+    oil::OilState,
     quickfix::QuickfixList,
     register::Registers,
     theme::{self, Theme},
@@ -1308,6 +1309,9 @@ pub struct Editor {
 
     /// The quickfix list for storing and navigating file locations.
     pub quickfix: QuickfixList,
+
+    /// Oil buffer states, keyed by document ID.
+    pub oil_buffers: HashMap<DocumentId, OilState>,
 }
 
 pub type Motion = Box<dyn Fn(&mut Editor)>;
@@ -1441,6 +1445,7 @@ impl Editor {
             ctrl_hover_range: None,
             cursor_cache: CursorCache::default(),
             quickfix: QuickfixList::new(),
+            oil_buffers: HashMap::new(),
         }
     }
 
@@ -1858,6 +1863,9 @@ impl Editor {
                     let id = doc.id;
                     self.documents.remove(&id);
 
+                    // Clean up oil buffer state if this was an oil buffer
+                    self.close_oil_buffer(id);
+
                     // Remove the scratch buffer from any jumplists
                     for (view, _) in self.tree.views_mut() {
                         view.remove_document(&id);
@@ -2043,6 +2051,140 @@ impl Editor {
         }
     }
 
+    // --- Oil file manager methods ---
+
+    /// Check if a document is an oil buffer.
+    pub fn is_oil_buffer(&self, doc_id: DocumentId) -> bool {
+        self.oil_buffers.contains_key(&doc_id)
+    }
+
+    /// Get the oil state for a document, if it's an oil buffer.
+    pub fn oil_state(&self, doc_id: DocumentId) -> Option<&OilState> {
+        self.oil_buffers.get(&doc_id)
+    }
+
+    /// Get the oil state mutably for a document, if it's an oil buffer.
+    pub fn oil_state_mut(&mut self, doc_id: DocumentId) -> Option<&mut OilState> {
+        self.oil_buffers.get_mut(&doc_id)
+    }
+
+    /// Find an existing oil buffer for a directory.
+    pub fn oil_buffer_for_directory(&self, directory: &Path) -> Option<DocumentId> {
+        self.oil_buffers.iter().find_map(|(doc_id, state)| {
+            if state.directory == directory {
+                Some(*doc_id)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Open an oil buffer for a directory.
+    /// If an oil buffer for this directory already exists, switches to it.
+    /// Otherwise, creates a new oil buffer.
+    pub fn open_oil_buffer(
+        &mut self,
+        directory: PathBuf,
+        action: Action,
+    ) -> Result<DocumentId, std::io::Error> {
+        use crate::oil::{generate_oil_buffer_content, read_directory_entries, OilSortOrder};
+
+        // Canonicalize the directory path
+        let directory = helix_stdx::path::canonicalize(&directory);
+
+        // Check if we already have an oil buffer for this directory
+        if let Some(doc_id) = self.oil_buffer_for_directory(&directory) {
+            self.switch(doc_id, action);
+            return Ok(doc_id);
+        }
+
+        // Read directory entries
+        let entries = read_directory_entries(&directory, false, OilSortOrder::Name)?;
+
+        // Generate buffer content
+        let content = generate_oil_buffer_content(&directory, &entries);
+        let rope = helix_core::Rope::from(content.as_str());
+
+        // Create oil state
+        let mut oil_state = OilState::new(directory.clone());
+        oil_state.original_entries = entries;
+
+        // Create the document
+        let mut doc = Document::from(rope, None, self.config.clone(), self.syn_loader.clone());
+        doc.set_custom_name(oil_state.buffer_name());
+
+        // Add the document and track it as an oil buffer
+        let doc_id = self.new_file_from_document(action, doc);
+
+        // Store oil state
+        self.oil_buffers.insert(doc_id, oil_state);
+
+        // Mark as not modified (it's a generated buffer)
+        if let Some(doc) = self.documents.get_mut(&doc_id) {
+            doc.reset_modified();
+
+            // Position cursor at first entry (after header)
+            let view_id = self.tree.focus;
+            doc.ensure_view_init(view_id);
+            let text = doc.text();
+            // Skip to line 3 (after 2 header lines and blank line)
+            let pos = if text.len_lines() > 3 {
+                text.line_to_char(3)
+            } else {
+                0
+            };
+            doc.set_selection(view_id, Selection::point(pos));
+        }
+
+        Ok(doc_id)
+    }
+
+    /// Refresh an oil buffer by re-reading the directory.
+    pub fn refresh_oil_buffer(&mut self, doc_id: DocumentId) -> Result<(), std::io::Error> {
+        use crate::oil::{generate_oil_buffer_content, read_directory_entries};
+
+        let oil_state = match self.oil_buffers.get(&doc_id) {
+            Some(state) => state.clone(),
+            None => return Ok(()), // Not an oil buffer
+        };
+
+        // Read directory entries
+        let entries = read_directory_entries(
+            &oil_state.directory,
+            oil_state.show_hidden,
+            oil_state.sort_order,
+        )?;
+
+        // Generate new content
+        let content = generate_oil_buffer_content(&oil_state.directory, &entries);
+
+        // Update the oil state
+        if let Some(state) = self.oil_buffers.get_mut(&doc_id) {
+            state.original_entries = entries;
+        }
+
+        // Update the document content
+        if let Some(doc) = self.documents.get_mut(&doc_id) {
+            let view_id = self.tree.focus;
+            doc.ensure_view_init(view_id);
+            let text = doc.text().clone();
+            let len = text.len_chars();
+            let transaction = helix_core::Transaction::change(
+                &text,
+                [(0, len, Some(content.as_str().into()))].into_iter(),
+            );
+            doc.apply(&transaction, view_id);
+            doc.reset_modified();
+        }
+
+        Ok(())
+    }
+
+    /// Clean up oil state when a document is closed.
+    pub fn close_oil_buffer(&mut self, doc_id: DocumentId) {
+        self.oil_buffers.remove(&doc_id);
+    }
+
     pub fn document_id_by_path(&self, path: &Path) -> Option<DocumentId> {
         self.document_by_path(path).map(|doc| doc.id)
     }
@@ -2146,6 +2288,9 @@ impl Editor {
         }
 
         let doc = self.documents.remove(&doc_id).unwrap();
+
+        // Clean up oil buffer state if this was an oil buffer
+        self.close_oil_buffer(doc_id);
 
         // If the document we removed was visible in all views, we will have no more views. We don't
         // want to close the editor just for a simple buffer close, so we need to create a new view

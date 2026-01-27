@@ -380,6 +380,16 @@ fn write_impl(
     path: Option<&str>,
     options: WriteOptions,
 ) -> anyhow::Result<()> {
+    let doc_id = {
+        let (_, doc) = current!(cx.editor);
+        doc.id()
+    };
+
+    // Check if this is an oil buffer
+    if cx.editor.is_oil_buffer(doc_id) {
+        return write_oil_buffer(cx, doc_id);
+    }
+
     let config = cx.editor.config();
     let jobs = &mut cx.jobs;
     let (view, doc) = current!(cx.editor);
@@ -417,6 +427,79 @@ fn write_impl(
     if fmt.is_none() {
         let id = doc.id();
         cx.editor.save(id, path, options.force)?;
+    }
+
+    Ok(())
+}
+
+/// Handle writing an oil buffer - apply file operations instead of saving.
+fn write_oil_buffer(
+    cx: &mut compositor::Context,
+    doc_id: helix_view::DocumentId,
+) -> anyhow::Result<()> {
+    use helix_view::oil::{compute_oil_operations, execute_oil_operations, OilOperation};
+
+    // Get current buffer content and oil state
+    let (current_content, oil_state) = {
+        let doc = cx.editor.documents.get(&doc_id).ok_or_else(|| {
+            anyhow::anyhow!("Document not found")
+        })?;
+        let content = doc.text().to_string();
+
+        let oil_state = cx.editor.oil_state(doc_id).ok_or_else(|| {
+            anyhow::anyhow!("Not an oil buffer")
+        })?.clone();
+
+        (content, oil_state)
+    };
+
+    // Compute operations
+    let operations = compute_oil_operations(
+        &oil_state.original_entries,
+        &current_content,
+        &oil_state.directory,
+    );
+
+    if operations.is_empty() {
+        cx.editor.set_status("No changes to apply");
+        // Reset modified state
+        if let Some(doc) = cx.editor.documents.get_mut(&doc_id) {
+            doc.reset_modified();
+        }
+        return Ok(());
+    }
+
+    // Check for deletions and warn
+    let has_deletions = operations.iter().any(|op| matches!(op, OilOperation::Delete { .. }));
+    if has_deletions {
+        // For now, just proceed with deletions. A more complete implementation
+        // would use a confirmation prompt.
+        log::info!("Oil: Applying operations including deletions");
+    }
+
+    // Describe operations for status
+    let op_descriptions: Vec<String> = operations.iter().map(|op| op.description()).collect();
+
+    // Execute operations
+    match execute_oil_operations(&operations) {
+        Ok(count) => {
+            cx.editor.set_status(format!("Applied {} operation(s)", count));
+            log::info!("Oil operations applied: {:?}", op_descriptions);
+        }
+        Err((idx, err)) => {
+            let failed_op = &operations[idx];
+            cx.editor.set_error(format!(
+                "Failed to {}: {}",
+                failed_op.description(),
+                err
+            ));
+            return Err(anyhow::anyhow!("Oil operation failed: {}", err));
+        }
+    }
+
+    // Refresh the oil buffer to reflect the new state
+    if let Err(e) = cx.editor.refresh_oil_buffer(doc_id) {
+        cx.editor.set_error(format!("Failed to refresh oil buffer: {}", e));
     }
 
     Ok(())
@@ -2747,6 +2830,35 @@ fn noop(_cx: &mut compositor::Context, _args: Args, _event: PromptEvent) -> anyh
     Ok(())
 }
 
+fn oil_command(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    use helix_view::editor::Action;
+
+    let directory = if let Some(path) = args.first() {
+        let path = helix_stdx::path::expand_tilde(std::path::Path::new(path));
+        helix_stdx::path::canonicalize(&path)
+    } else {
+        helix_core::find_workspace().0
+    };
+
+    if !directory.exists() {
+        anyhow::bail!("Directory does not exist: {}", directory.display());
+    }
+
+    if !directory.is_dir() {
+        anyhow::bail!("Path is not a directory: {}", directory.display());
+    }
+
+    cx.editor
+        .open_oil_buffer(directory, Action::Replace)
+        .map_err(|e| anyhow::anyhow!("Failed to open oil buffer: {}", e))?;
+
+    Ok(())
+}
+
 /// This command accepts a single boolean --skip-visible flag and no positionals.
 const BUFFER_CLOSE_OTHERS_SIGNATURE: Signature = Signature {
     positionals: (0, Some(0)),
@@ -3816,6 +3928,17 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         completer: CommandCompleter::none(),
         signature: Signature {
             positionals: (0, None),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "oil",
+        aliases: &[],
+        doc: "Open oil file manager. Optionally specify a directory path.",
+        fun: oil_command,
+        completer: CommandCompleter::positional(&[completers::directory]),
+        signature: Signature {
+            positionals: (0, Some(1)),
             ..Signature::DEFAULT
         },
     },
