@@ -446,6 +446,7 @@ impl MappableCommand {
         oil_open_buffer_dir, "Open oil file manager at buffer's directory",
         oil_enter, "Open file or directory in oil buffer",
         oil_parent, "Navigate to parent directory in oil buffer",
+        oil_back, "Go back to previous directory in oil buffer",
         oil_toggle_hidden, "Toggle hidden files in oil buffer",
         oil_refresh, "Refresh oil buffer",
         insert_at_line_start, "Insert at start of line",

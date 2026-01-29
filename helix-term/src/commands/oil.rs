@@ -89,8 +89,8 @@ pub fn oil_enter(cx: &mut Context) {
 
     if let Some((path, file_type)) = path_from_entry {
         if file_type == OilFileType::Directory {
-            // Navigate into the directory
-            match cx.editor.open_oil_buffer(path, Action::Replace) {
+            // Navigate into the directory (with history)
+            match cx.editor.oil_navigate_to(doc_id, path) {
                 Ok(_) => {}
                 Err(e) => {
                     cx.editor
@@ -112,7 +112,7 @@ pub fn oil_enter(cx: &mut Context) {
         if parsed.is_dir {
             // Try to navigate into it if it exists
             if path.is_dir() {
-                match cx.editor.open_oil_buffer(path, Action::Replace) {
+                match cx.editor.oil_navigate_to(doc_id, path) {
                     Ok(_) => {}
                     Err(e) => {
                         cx.editor
@@ -140,7 +140,7 @@ pub fn oil_enter(cx: &mut Context) {
     }
 }
 
-/// Navigate to parent directory in oil buffer.
+/// Navigate to parent directory in oil buffer (with history).
 pub fn oil_parent(cx: &mut Context) {
     let doc_id = {
         let (_, doc) = current!(cx.editor);
@@ -161,11 +161,36 @@ pub fn oil_parent(cx: &mut Context) {
         }
     };
 
-    match cx.editor.open_oil_buffer(parent, Action::Replace) {
+    // Navigate with history
+    match cx.editor.oil_navigate_to(doc_id, parent) {
         Ok(_) => {}
         Err(e) => {
             cx.editor
                 .set_error(format!("Failed to open parent directory: {}", e));
+        }
+    }
+}
+
+/// Go back to the previous directory in oil buffer history.
+pub fn oil_back(cx: &mut Context) {
+    let doc_id = {
+        let (_, doc) = current!(cx.editor);
+        doc.id()
+    };
+
+    if !cx.editor.is_oil_buffer(doc_id) {
+        return; // Not an oil buffer
+    }
+
+    match cx.editor.oil_go_back(doc_id) {
+        Ok(Some(_)) => {
+            // Successfully went back
+        }
+        Ok(None) => {
+            cx.editor.set_status("No previous directory in history");
+        }
+        Err(e) => {
+            cx.editor.set_error(format!("Failed to go back: {}", e));
         }
     }
 }

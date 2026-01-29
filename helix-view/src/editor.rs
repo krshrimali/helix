@@ -2180,6 +2180,135 @@ impl Editor {
         Ok(())
     }
 
+    /// Navigate an existing oil buffer to a new directory, pushing to history.
+    pub fn oil_navigate_to(
+        &mut self,
+        doc_id: DocumentId,
+        new_directory: PathBuf,
+    ) -> Result<(), std::io::Error> {
+        use crate::oil::{generate_oil_buffer_content, read_directory_entries};
+
+        let oil_state = match self.oil_buffers.get_mut(&doc_id) {
+            Some(state) => state,
+            None => return Ok(()), // Not an oil buffer
+        };
+
+        // Push current directory to history
+        oil_state.push_history();
+
+        // Read new directory entries
+        let entries = read_directory_entries(
+            &new_directory,
+            oil_state.show_hidden,
+            oil_state.sort_order,
+        )?;
+
+        // Update oil state
+        oil_state.directory = new_directory.clone();
+        oil_state.original_entries = entries.clone();
+
+        // Generate new content
+        let content = generate_oil_buffer_content(&new_directory, &entries);
+
+        // Update the document
+        if let Some(doc) = self.documents.get_mut(&doc_id) {
+            // Update custom name
+            doc.set_custom_name(format!(
+                "{}{}",
+                crate::oil::OIL_BUFFER_NAME_PREFIX,
+                new_directory.display()
+            ));
+
+            let view_id = self.tree.focus;
+            doc.ensure_view_init(view_id);
+            let text = doc.text().clone();
+            let len = text.len_chars();
+            let transaction = helix_core::Transaction::change(
+                &text,
+                [(0, len, Some(content.as_str().into()))].into_iter(),
+            );
+            doc.apply(&transaction, view_id);
+            doc.reset_modified();
+
+            // Position cursor at first entry
+            let text = doc.text();
+            let pos = if text.len_lines() > 3 {
+                text.line_to_char(3)
+            } else {
+                0
+            };
+            doc.set_selection(view_id, Selection::point(pos));
+        }
+
+        Ok(())
+    }
+
+    /// Navigate an oil buffer back in history.
+    pub fn oil_go_back(&mut self, doc_id: DocumentId) -> Result<Option<PathBuf>, std::io::Error> {
+        use crate::oil::{generate_oil_buffer_content, read_directory_entries};
+
+        let previous_dir = {
+            let oil_state = match self.oil_buffers.get_mut(&doc_id) {
+                Some(state) => state,
+                None => return Ok(None), // Not an oil buffer
+            };
+
+            match oil_state.pop_history() {
+                Some(dir) => dir,
+                None => return Ok(None), // No history
+            }
+        };
+
+        // Get current state for show_hidden and sort_order
+        let (show_hidden, sort_order) = {
+            let oil_state = self.oil_buffers.get(&doc_id).unwrap();
+            (oil_state.show_hidden, oil_state.sort_order)
+        };
+
+        // Read directory entries
+        let entries = read_directory_entries(&previous_dir, show_hidden, sort_order)?;
+
+        // Generate new content
+        let content = generate_oil_buffer_content(&previous_dir, &entries);
+
+        // Update oil state (without pushing to history since we're going back)
+        if let Some(state) = self.oil_buffers.get_mut(&doc_id) {
+            state.directory = previous_dir.clone();
+            state.original_entries = entries;
+        }
+
+        // Update the document
+        if let Some(doc) = self.documents.get_mut(&doc_id) {
+            doc.set_custom_name(format!(
+                "{}{}",
+                crate::oil::OIL_BUFFER_NAME_PREFIX,
+                previous_dir.display()
+            ));
+
+            let view_id = self.tree.focus;
+            doc.ensure_view_init(view_id);
+            let text = doc.text().clone();
+            let len = text.len_chars();
+            let transaction = helix_core::Transaction::change(
+                &text,
+                [(0, len, Some(content.as_str().into()))].into_iter(),
+            );
+            doc.apply(&transaction, view_id);
+            doc.reset_modified();
+
+            // Position cursor at first entry
+            let text = doc.text();
+            let pos = if text.len_lines() > 3 {
+                text.line_to_char(3)
+            } else {
+                0
+            };
+            doc.set_selection(view_id, Selection::point(pos));
+        }
+
+        Ok(Some(previous_dir))
+    }
+
     /// Clean up oil state when a document is closed.
     pub fn close_oil_buffer(&mut self, doc_id: DocumentId) {
         self.oil_buffers.remove(&doc_id);

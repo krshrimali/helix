@@ -103,6 +103,8 @@ pub struct OilState {
     pub show_hidden: bool,
     /// Sort order for entries.
     pub sort_order: OilSortOrder,
+    /// Navigation history (stack of previously visited directories).
+    pub history: Vec<PathBuf>,
 }
 
 impl OilState {
@@ -113,12 +115,28 @@ impl OilState {
             original_entries: Vec::new(),
             show_hidden: false,
             sort_order: OilSortOrder::default(),
+            history: Vec::new(),
         }
     }
 
     /// Get the buffer name for this oil state.
     pub fn buffer_name(&self) -> String {
         format!("{}{}", OIL_BUFFER_NAME_PREFIX, self.directory.display())
+    }
+
+    /// Push current directory to history before navigating away.
+    pub fn push_history(&mut self) {
+        self.history.push(self.directory.clone());
+    }
+
+    /// Pop and return the previous directory from history.
+    pub fn pop_history(&mut self) -> Option<PathBuf> {
+        self.history.pop()
+    }
+
+    /// Check if there's history to go back to.
+    pub fn has_history(&self) -> bool {
+        !self.history.is_empty()
     }
 }
 

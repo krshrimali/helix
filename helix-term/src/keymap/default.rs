@@ -193,6 +193,8 @@ pub fn default() -> (HashMap<Mode, KeyTrie>, PickerKeymap) {
         "ret" => quickfix_jump_to_location,
         // Backspace goes to parent directory in oil buffer, no-op otherwise
         "backspace" => oil_parent,
+        // Minus goes back in oil buffer history, no-op otherwise
+        "minus" => oil_back,
 
         "esc" => normal_mode,
         "C-b" | "pageup" => page_up,
