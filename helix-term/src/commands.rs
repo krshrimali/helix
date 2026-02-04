@@ -1,10 +1,12 @@
 pub(crate) mod dap;
+pub(crate) mod github;
 pub(crate) mod lsp;
 pub(crate) mod oil;
 pub(crate) mod syntax;
 pub(crate) mod typed;
 
 pub use dap::*;
+pub use github::*;
 pub use oil::*;
 use futures_util::FutureExt;
 use helix_event::status;
@@ -417,6 +419,7 @@ impl MappableCommand {
         file_explorer_in_current_directory, "Open file explorer at current working directory",
         code_action, "Perform code action",
         buffer_picker, "Open buffer picker",
+        recent_file_picker, "Open recent files picker",
         jumplist_picker, "Open jumplist picker",
         symbol_picker, "Open symbol picker",
         syntax_symbol_picker, "Open symbol picker from syntax information",
@@ -449,6 +452,14 @@ impl MappableCommand {
         oil_back, "Go back to previous directory in oil buffer",
         oil_toggle_hidden, "Toggle hidden files in oil buffer",
         oil_refresh, "Refresh oil buffer",
+        github_pr_picker, "Open GitHub PR picker",
+        github_pr_picker_open, "Open GitHub PR picker (open PRs only)",
+        github_pr_picker_mine, "Open GitHub PR picker (my PRs)",
+        github_pr_picker_review, "Open GitHub PR picker (PRs needing my review)",
+        github_pr_next_file, "Go to next file in PR diff",
+        github_pr_prev_file, "Go to previous file in PR diff",
+        github_pr_next_hunk, "Go to next hunk in PR diff",
+        github_pr_prev_hunk, "Go to previous hunk in PR diff",
         insert_at_line_start, "Insert at start of line",
         insert_at_line_end, "Insert at end of line",
         open_below, "Open new line below selection",
@@ -3291,6 +3302,39 @@ fn buffer_picker(cx: &mut Context) {
             path.display().to_string(),
         ))
     });
+    cx.push_layer(Box::new(overlaid(picker)));
+}
+
+fn recent_file_picker(cx: &mut Context) {
+    // Collect recent files that still exist
+    let items: Vec<PathBuf> = cx
+        .editor
+        .recent_files
+        .iter()
+        .filter(|p| p.is_file())
+        .cloned()
+        .collect();
+
+    if items.is_empty() {
+        cx.editor.set_error("No recent files");
+        return;
+    }
+
+    let columns = [PickerColumn::new("path", |path: &PathBuf, _| {
+        helix_stdx::path::get_relative_path(path)
+            .to_string_lossy()
+            .into_owned()
+            .into()
+    })];
+
+    let picker = Picker::new(columns, 0, items, (), |cx, path, action| {
+        if let Err(e) = cx.editor.open(path, action) {
+            let err = format!("failed to open file: {}", e);
+            cx.editor.set_error(err);
+        }
+    })
+    .with_preview(|_editor, path| Some((path.as_path().into(), None)));
+
     cx.push_layer(Box::new(overlaid(picker)));
 }
 

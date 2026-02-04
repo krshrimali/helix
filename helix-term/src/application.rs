@@ -1448,6 +1448,9 @@ impl Application {
             ));
         }
 
+        // Save recent files to disk
+        self.editor.recent_files.save();
+
         errs
     }
 }

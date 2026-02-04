@@ -2,6 +2,7 @@
 pub mod macros;
 
 pub mod annotations;
+pub mod github;
 pub mod oil;
 pub mod clipboard;
 pub mod document;
@@ -15,6 +16,7 @@ pub mod info;
 pub mod input;
 pub mod keyboard;
 pub mod quickfix;
+pub mod recent_files;
 pub mod register;
 pub mod theme;
 pub mod tree;

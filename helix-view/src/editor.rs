@@ -5,12 +5,14 @@ use crate::{
         DocumentOpenError, DocumentSavedEventFuture, DocumentSavedEventResult, Mode, SavePoint,
     },
     events::{DocumentDidClose, DocumentDidOpen, DocumentFocusLost},
+    github::PRDiffState,
     graphics::{CursorKind, Rect},
     handlers::Handlers,
     info::Info,
     input::KeyEvent,
     oil::OilState,
     quickfix::QuickfixList,
+    recent_files::RecentFiles,
     register::Registers,
     theme::{self, Theme},
     tree::{self, Tree},
@@ -1312,6 +1314,12 @@ pub struct Editor {
 
     /// Oil buffer states, keyed by document ID.
     pub oil_buffers: HashMap<DocumentId, OilState>,
+
+    /// GitHub PR diff buffer states, keyed by document ID.
+    pub github_pr_buffers: HashMap<DocumentId, PRDiffState>,
+
+    /// Recently opened files, persisted across sessions.
+    pub recent_files: RecentFiles,
 }
 
 pub type Motion = Box<dyn Fn(&mut Editor)>;
@@ -1446,6 +1454,8 @@ impl Editor {
             cursor_cache: CursorCache::default(),
             quickfix: QuickfixList::new(),
             oil_buffers: HashMap::new(),
+            github_pr_buffers: HashMap::new(),
+            recent_files: RecentFiles::load(),
         }
     }
 
@@ -2314,6 +2324,26 @@ impl Editor {
         self.oil_buffers.remove(&doc_id);
     }
 
+    /// Get the GitHub PR diff state for a document, if it's a PR diff buffer.
+    pub fn github_pr_state(&self, doc_id: DocumentId) -> Option<&PRDiffState> {
+        self.github_pr_buffers.get(&doc_id)
+    }
+
+    /// Get the GitHub PR diff state mutably for a document, if it's a PR diff buffer.
+    pub fn github_pr_state_mut(&mut self, doc_id: DocumentId) -> Option<&mut PRDiffState> {
+        self.github_pr_buffers.get_mut(&doc_id)
+    }
+
+    /// Check if a document is a GitHub PR diff buffer.
+    pub fn is_github_pr_buffer(&self, doc_id: DocumentId) -> bool {
+        self.github_pr_buffers.contains_key(&doc_id)
+    }
+
+    /// Clean up GitHub PR diff state when a document is closed.
+    pub fn close_github_pr_buffer(&mut self, doc_id: DocumentId) {
+        self.github_pr_buffers.remove(&doc_id);
+    }
+
     pub fn document_id_by_path(&self, path: &Path) -> Option<DocumentId> {
         self.document_by_path(path).map(|doc| doc.id)
     }
@@ -2355,6 +2385,11 @@ impl Editor {
         };
 
         self.switch(id, action);
+
+        // Track in recent files (only for real files, not scratch buffers)
+        if path.is_file() {
+            self.recent_files.push(path);
+        }
 
         Ok(id)
     }

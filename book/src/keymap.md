@@ -288,11 +288,13 @@ This layer is a kludge of mappings, mostly pickers.
 
 | Key     | Description                                                             | Command                                    |
 | -----   | -----------                                                             | -------                                    |
-| `f`     | Open file picker at LSP workspace root                                  | `file_picker`                              |
+| `f`     | File submenu                                                            | N/A                                        |
+| `f` `f` | Open file picker at LSP workspace root                                  | `file_picker`                              |
+| `f` `p` | Open recent files picker                                                | `recent_file_picker`                       |
 | `F`     | Open file picker at current working directory                           | `file_picker_in_current_directory`         |
 | `b`     | Open buffer picker                                                      | `buffer_picker`                            |
 | `j`     | Open jumplist picker                                                    | `jumplist_picker`                          |
-| `g`     | Open changed file picker                                                | `changed_file_picker`                      |
+| `g`     | Enter [git mode](#git-submenu)                                          | N/A                                        |
 | `G`     | Debug (experimental)                                                    | N/A                                        |
 | `k`     | Show documentation for item under cursor in a [popup](#popup) (**LSP**) | `hover`                                    |
 | `s`     | Open document symbol picker (**LSP** or **TS**)                         | `lsp_or_syntax_symbol_picker`              |
@@ -316,6 +318,20 @@ This layer is a kludge of mappings, mostly pickers.
 | `?`     | Open command palette                                                    | `command_palette`                          |
 
 > 💡 Global search displays results in a fuzzy picker, use `Space + '` to bring it back up after opening a file.
+
+##### Git submenu
+
+Accessed by typing `Space g` in [normal mode](#normal-mode).
+
+| Key       | Description                                   | Command                    |
+| -----     | -----------                                   | -------                    |
+| `g`       | Open changed file picker                      | `changed_file_picker`      |
+| `P` `P`   | Open GitHub PR picker                         | `github_pr_picker`         |
+| `P` `o`   | Open GitHub PR picker (open PRs only)         | `github_pr_picker_open`    |
+| `P` `m`   | Open GitHub PR picker (my PRs)                | `github_pr_picker_mine`    |
+| `P` `r`   | Open GitHub PR picker (PRs needing my review) | `github_pr_picker_review`  |
+
+> 💡 GitHub PR commands require the `gh` CLI to be installed and authenticated (`gh auth login`).
 
 ##### Popup
 

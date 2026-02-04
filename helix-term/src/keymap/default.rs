@@ -235,7 +235,10 @@ pub fn default() -> (HashMap<Mode, KeyTrie>, PickerKeymap) {
         "C-s" => save_selection,
 
         "space" => { "Space"
-            "f" => file_picker,
+            "f" => { "File"
+                "f" => file_picker,
+                "p" => recent_file_picker,
+            },
             "F" => file_picker_in_current_directory,
             "e" => file_explorer,
             "E" => file_explorer_in_current_buffer_directory,
@@ -245,7 +248,15 @@ pub fn default() -> (HashMap<Mode, KeyTrie>, PickerKeymap) {
             "S" => lsp_or_syntax_workspace_symbol_picker,
             "d" => diagnostics_picker,
             "D" => workspace_diagnostics_picker,
-            "g" => changed_file_picker,
+            "g" => { "Git"
+                "g" => changed_file_picker,
+                "P" => { "Pull Requests"
+                    "P" => github_pr_picker,
+                    "o" => github_pr_picker_open,
+                    "m" => github_pr_picker_mine,
+                    "r" => github_pr_picker_review,
+                },
+            },
             "a" => code_action,
             "l" => { "Lazygit"
                 "g" => lazygit,
