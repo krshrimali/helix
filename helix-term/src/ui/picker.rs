@@ -1112,10 +1112,26 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             offset.horizontal_offset = offset.horizontal_offset.saturating_add(user_scroll_offset.horizontal_offset);
 
             let loader = cx.editor.syn_loader.load();
+            let config = cx.editor.config();
 
             let syntax_highlighter =
                 EditorView::doc_syntax_highlighter(doc, offset.anchor, area.height, &loader);
             let mut overlay_highlights = Vec::new();
+            if doc
+                .language_config()
+                .and_then(|config| config.rainbow_brackets)
+                .unwrap_or(config.rainbow_brackets)
+            {
+                if let Some(overlay) = EditorView::doc_rainbow_highlights(
+                    doc,
+                    offset.anchor,
+                    area.height,
+                    &cx.editor.theme,
+                    &loader,
+                ) {
+                    overlay_highlights.push(overlay);
+                }
+            }
 
             if cx.editor.config().show_diagnostics {
                 EditorView::doc_diagnostics_highlights_into(
