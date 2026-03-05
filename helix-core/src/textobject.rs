@@ -289,6 +289,83 @@ pub fn textobject_treesitter(
     get_range().unwrap_or(range)
 }
 
+/// Extract breadcrumb context (class/function names) at the given cursor position.
+///
+/// Returns a `Vec<String>` of names sorted outermost-first (e.g., `["ClassName", "method_name"]`).
+/// Uses textobject queries (`function.around`, `class.around`) to find enclosing scopes,
+/// then extracts the name of each scope via the tree-sitter `name` field.
+pub fn get_breadcrumb_context(
+    slice: RopeSlice<'_>,
+    cursor_pos: usize,
+    syntax: &Syntax,
+    loader: &syntax::Loader,
+) -> Vec<String> {
+    let root = syntax.tree().root_node();
+    let textobject_query = match loader.textobject_query(syntax.root_language()) {
+        Some(q) => q,
+        None => return Vec::new(),
+    };
+
+    let byte_pos = slice.char_to_byte(cursor_pos);
+
+    // Collect all function.around and class.around nodes containing the cursor
+    let mut scope_nodes: Vec<(usize, String)> = Vec::new(); // (byte_range_len, name)
+
+    for capture_name in &["class.around", "function.around"] {
+        if let Some(nodes) = textobject_query.capture_nodes(capture_name, &root, slice) {
+            for captured_node in nodes.filter(|n| n.byte_range().contains(&byte_pos)) {
+                let start = captured_node.start_byte();
+                let end = captured_node.end_byte();
+                let range_len = end - start;
+
+                // Find the actual tree-sitter node at this range to extract the name
+                if let Some(node) =
+                    syntax.named_descendant_for_byte_range(start as u32, end as u32)
+                {
+                    // Walk children to find the one with field_name "name"
+                    if let Some(name) = extract_node_name(&node, slice) {
+                        scope_nodes.push((range_len, name));
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort by range size descending (outermost first)
+    scope_nodes.sort_by(|a, b| b.0.cmp(&a.0));
+
+    // Deduplicate by name (in case class.around and function.around overlap)
+    scope_nodes.dedup_by(|a, b| a.1 == b.1);
+
+    scope_nodes.into_iter().map(|(_, name)| name).collect()
+}
+
+/// Extract the name from a tree-sitter node by looking for a child with field name "name".
+fn extract_node_name(node: &crate::tree_sitter::Node<'_>, slice: RopeSlice<'_>) -> Option<String> {
+    let mut cursor = node.walk();
+    if !cursor.goto_first_child() {
+        return None;
+    }
+
+    loop {
+        if cursor.field_name() == Some("name") {
+            let name_node = cursor.node();
+            let start = name_node.start_byte() as usize;
+            let end = name_node.end_byte() as usize;
+            if start < slice.len_bytes() && end <= slice.len_bytes() {
+                let start_char = slice.byte_to_char(start);
+                let end_char = slice.byte_to_char(end);
+                return Some(slice.slice(start_char..end_char).to_string());
+            }
+        }
+        if !cursor.goto_next_sibling() {
+            break;
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod test {
     use super::TextObject::*;

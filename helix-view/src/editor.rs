@@ -763,6 +763,9 @@ pub enum StatusLineElement {
 
     /// The base of current working directory
     CurrentWorkingDirectory,
+
+    /// Breadcrumbs showing the cursor's context path (file > class > function)
+    Breadcrumbs,
 }
 
 // Cursor shape is read and used on every rendered frame and so needs

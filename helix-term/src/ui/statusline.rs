@@ -157,6 +157,7 @@ where
         helix_view::editor::StatusLineElement::VersionControl => render_version_control,
         helix_view::editor::StatusLineElement::Register => render_register,
         helix_view::editor::StatusLineElement::CurrentWorkingDirectory => render_cwd,
+        helix_view::editor::StatusLineElement::Breadcrumbs => render_breadcrumbs,
     }
 }
 
@@ -584,4 +585,46 @@ where
         .to_string_lossy()
         .to_string();
     write(context, cwd.into())
+}
+
+fn render_breadcrumbs<'a, F>(context: &mut RenderContext<'a>, write: F)
+where
+    F: Fn(&mut RenderContext<'a>, Span<'a>) + Copy,
+{
+    let doc = context.doc;
+    let view = context.view;
+
+    // Start with the file base name
+    let file_name = doc
+        .relative_path()
+        .and_then(|p| p.file_name().map(|s| s.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| SCRATCH_BUFFER_NAME.to_string());
+
+    let syntax = match doc.syntax() {
+        Some(syn) => syn,
+        None => {
+            write(context, format!(" {} ", file_name).into());
+            return;
+        }
+    };
+
+    let text = doc.text().slice(..);
+    let cursor_pos = doc
+        .selection(view.id)
+        .primary()
+        .cursor(text);
+
+    let loader = context.editor.syn_loader.load();
+    let scope_names =
+        helix_core::textobject::get_breadcrumb_context(text, cursor_pos, syntax, &loader);
+
+    let sep = " > ";
+    let mut result = format!(" {}", file_name);
+    for name in &scope_names {
+        result.push_str(sep);
+        result.push_str(name);
+    }
+    result.push(' ');
+
+    write(context, result.into());
 }
